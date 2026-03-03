@@ -88,8 +88,10 @@ fun POSTaxCalculatorScreen() {
     var taxes by remember {
         mutableStateOf(
             listOf(
-                Tax("vat",     "VAT",     BigDecimal("10"), TaxMode.EXCLUDE, false),
-                Tax("service", "Service", BigDecimal("5"),  TaxMode.EXCLUDE, false)
+                Tax("inc1",     "Inc1",     BigDecimal("5"), TaxMode.INCLUDE, false),
+                Tax("inc2", "Inc2", BigDecimal("10"),  TaxMode.INCLUDE, false),
+                Tax("service", "Service", BigDecimal("10"),  TaxMode.EXCLUDE, false),
+                Tax("gst", "GST", BigDecimal("18"),  TaxMode.EXCLUDE, false),
             )
         )
     }
@@ -98,17 +100,17 @@ fun POSTaxCalculatorScreen() {
     var items by remember {
         mutableStateOf(
             listOf(
-                Item("1", "Product A", BigDecimal("2"), BigDecimal("50.00"),
+                Item("1", "Product A", BigDecimal("1"), BigDecimal("390.00"),
                     appliedDiscountIds = setOf(lineDiscounts[0].id),
-                    appliedTaxIds      = setOf("vat", "service")
+                    appliedTaxIds      = setOf("inc1", "inc2", "service", "gst")
                 ),
-                Item("2", "Product B", BigDecimal("1"), BigDecimal("30.00"),
+                Item("2", "Product B", BigDecimal("1"), BigDecimal("315.00"),
                     appliedDiscountIds = setOf(lineDiscounts[1].id),
-                    appliedTaxIds      = setOf("vat")
+                    appliedTaxIds      = setOf("inc1", "inc2", "service", "gst")
                 ),
-                Item("3", "Product C", BigDecimal("3"), BigDecimal("15.00"),
+                Item("3", "Product C", BigDecimal("1"), BigDecimal("70.00"),
                     appliedDiscountIds = emptySet(),
-                    appliedTaxIds      = emptySet()
+                    appliedTaxIds      = setOf("inc1", "inc2", "service", "gst")
                 )
             )
         )
