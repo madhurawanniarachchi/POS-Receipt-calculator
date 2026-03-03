@@ -101,11 +101,11 @@ fun POSTaxCalculatorScreen() {
         mutableStateOf(
             listOf(
                 Item("1", "Product A", BigDecimal("1"), BigDecimal("390.00"),
-                    appliedDiscountIds = setOf(lineDiscounts[0].id),
+                    appliedDiscountIds = emptySet(),
                     appliedTaxIds      = setOf("inc1", "inc2", "service", "gst")
                 ),
                 Item("2", "Product B", BigDecimal("1"), BigDecimal("315.00"),
-                    appliedDiscountIds = setOf(lineDiscounts[1].id),
+                    appliedDiscountIds = emptySet(),
                     appliedTaxIds      = setOf("inc1", "inc2", "service", "gst")
                 ),
                 Item("3", "Product C", BigDecimal("1"), BigDecimal("70.00"),
