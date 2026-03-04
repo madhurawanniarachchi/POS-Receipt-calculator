@@ -250,20 +250,24 @@ class POSTaxCalculator(
         val subtotal1         = s1list.fold(ZERO) { a, s -> a + s.netAfterLine }
 
         // ══════════════════════════════════════════════════════════════════════
-        // STEP 2 — Receipt discounts (sequential on running subtotal)
+        // STEP 2 — Receipt discounts (all computed from the ORIGINAL subtotal1 base)
         //          + round-robin distribution to items
+        //
+        // Every receipt discount — percent or fixed — is calculated against subtotal1,
+        // not a running remainder. Multiple discounts are independent and each references
+        // the same original base. The total deduction is their sum, clamped to subtotal1.
         // ══════════════════════════════════════════════════════════════════════
 
-        var runningSub = subtotal1
         val receiptDiscountAmounts = receiptDiscounts.map { disc ->
             val amt = when (disc.type) {
-                DiscountType.PERCENT -> (runningSub * disc.value / HUNDRED).r2()
-                DiscountType.FIXED   -> disc.value.r2().min(runningSub)
+                DiscountType.PERCENT -> (subtotal1 * disc.value / HUNDRED).r2()
+                DiscountType.FIXED   -> disc.value.r2().min(subtotal1)
             }.clampR2()
-            runningSub = (runningSub - amt).clampR2()
             disc to amt
         }
-        val totalReceiptDiscountAmount = receiptDiscountAmounts.fold(ZERO) { a, p -> a + p.second }
+        // Total deduction clamped so it cannot exceed the base
+        val totalReceiptDiscountAmount = receiptDiscountAmounts
+            .fold(ZERO) { a, p -> a + p.second }.min(subtotal1).r2()
         val subtotal2 = (subtotal1 - totalReceiptDiscountAmount).r2()
 
         // Distribute the total receipt discount to items (proportional to netAfterLine)

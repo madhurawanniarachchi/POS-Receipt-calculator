@@ -313,7 +313,7 @@ fun InputPanel(
                         )
                     }
                     if (receiptDiscounts.size > 1)
-                        Text("⚡ Applied sequentially — each taken from the previous subtotal",
+                        Text("⚡ Multiple discounts each calculated from the original subtotal — not compounded",
                             fontSize = 10.sp, color = POSColors.Amber)
                 }
             }
