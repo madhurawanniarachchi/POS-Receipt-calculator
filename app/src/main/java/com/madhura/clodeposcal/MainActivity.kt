@@ -779,6 +779,8 @@ fun ReceiptItem(item: ProcessedItem) {
 
 @Composable
 fun BalanceVerificationPanel(result: CalculationResult) {
+    // grandTotal = subtotal2 + exclusiveTaxTotal + fixedCharges
+    // Per-item cross-check: Σ(ard + exclTaxOnItem) + fixed == grandTotal
     val itemInclTaxSum = result.items.sumOfDecimal { it.totalInclTax }
     val grandTotalCheck = (itemInclTaxSum + result.totalFixedChargeAmount)
         .setScale(2, java.math.RoundingMode.HALF_UP)

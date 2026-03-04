@@ -471,7 +471,9 @@ class POSTaxCalculator(
                 taxLines              = taxLines,
                 totalExclTax          = inclBasePerItem[i],
                 totalTax              = totalAllTaxAmt,
-                totalInclTax          = (inclBasePerItem[i] + totalExclTaxAmt).r2()
+                // afterReceiptDiscount already contains embedded inclusive taxes;
+                // add only the exclusive taxes that are charged on top.
+                totalInclTax          = (afterReceiptDiscounts[i] + totalExclTaxAmt).r2()
             )
         }
 
@@ -482,9 +484,12 @@ class POSTaxCalculator(
         val fixedChargeResults     = fixedCharges.map { fc -> fc to fc.value.r2() }
         val totalFixedChargeAmount = fixedChargeResults.fold(ZERO) { a, p -> a + p.second }
 
-        // grandTotal = aggNetBase + exclusiveTaxTotal + fixedCharges
-        // (aggNetBase == subtotal2 net-of-inclusive-taxes)
-        val grandTotal = (aggNetBase + exclusiveTaxTotal + totalFixedChargeAmount).r2()
+        // grandTotal = subtotal2 + exclusiveTaxTotal + fixedCharges
+        //
+        // subtotal2 is the after-receipt-discount total with inclusive taxes STILL EMBEDDED.
+        // Inclusive taxes are part of the stated price — they do NOT add to the grand total.
+        // Only exclusive taxes (levied on top) and fixed charges increase the amount payable.
+        val grandTotal = (subtotal2 + exclusiveTaxTotal + totalFixedChargeAmount).r2()
 
         return CalculationResult(
             items                      = processedItems,
