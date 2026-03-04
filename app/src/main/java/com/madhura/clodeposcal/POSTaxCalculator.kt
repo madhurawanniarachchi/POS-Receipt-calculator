@@ -89,15 +89,21 @@ data class ProcessedItem(
     val netAfterLine: BigDecimal,
     /** Proportional share of the receipt-level discount. */
     val receiptDiscountShare: BigDecimal,
-    /** netAfterLine − receiptDiscountShare */
+    /** netAfterLine − receiptDiscountShare (inclusive-tax-inclusive price) */
     val afterReceiptDiscount: BigDecimal,
+    /**
+     * afterReceiptDiscount with all embedded inclusive-tax portions stripped out.
+     * = afterReceiptDiscount / (1 + sumIncludeRates / 100)
+     * This is the correct base for EXCLUSIVE taxes.
+     */
+    val inclusiveTaxBase: BigDecimal,
     /** Per-tax details, in processing order (BEFORE then AFTER). */
     val taxLines: List<TaxLine>,
-    /** afterReceiptDiscount (pre-tax base, for display) */
+    /** = inclusiveTaxBase (net amount before exclusive taxes are added) */
     val totalExclTax: BigDecimal,
     /** Σ all taxAmounts (INCLUDE + EXCLUDE) */
     val totalTax: BigDecimal,
-    /** afterReceiptDiscount + Σ EXCLUDE tax amounts */
+    /** inclusiveTaxBase + Σ EXCLUDE tax amounts */
     val totalInclTax: BigDecimal
 )
 
@@ -237,13 +243,24 @@ class POSTaxCalculator(
         // Processing order: BEFORE taxes first (in catalogue order),
         //                   then AFTER taxes (in catalogue order).
         //
-        // INCLUDE formula : taxable * rate / (100 + sumIncludeRates)
-        // EXCLUDE BEFORE  : taxable = afterReceiptDiscount
-        // EXCLUDE AFTER   : taxable = afterReceiptDiscount + previousTaxes
+        // Inclusive taxes are EMBEDDED in the price. The price net of those
+        // embedded taxes is the correct taxable base for EXCLUSIVE taxes.
+        //
+        //   sumIncludeRates  = Σ rate of all INCLUDE taxes on this item
+        //   inclusiveTaxBase = afterReceiptDiscount / (1 + sumIncludeRates / 100)
+        //                    = the pre-tax net amount (inclusive taxes stripped out)
+        //
+        // INCLUDE formula  : afterReceiptDiscount * rate / (100 + sumIncludeRates)
+        //                    (extracts the embedded portion — does NOT add to total)
+        // EXCLUDE BEFORE   : taxable = inclusiveTaxBase
+        //                    (exclusive tax applied on net-of-inclusive-tax amount)
+        // EXCLUDE AFTER    : taxable = inclusiveTaxBase + previousExclusiveTaxes
+        //                    (tax-on-tax: compounds on top of prior exclusive taxes)
         // ══════════════════════════════════════════════════════════════════════
 
         data class ItemTaxResult(
             val s3: Step3Result,
+            val inclusiveTaxBase: BigDecimal, // afterReceiptDiscount net of all inclusive taxes
             val taxLines: List<TaxLine>,
             val totalExclTaxAmt: BigDecimal,  // Σ EXCLUDE tax amounts
             val totalAllTaxAmt: BigDecimal    // Σ INCLUDE + EXCLUDE
@@ -252,21 +269,38 @@ class POSTaxCalculator(
         val itemTaxResults = step3.map { s3 ->
             val itemTaxes = taxes.filter { it.id in s3.s1.item.appliedTaxIds && it.rate > ZERO }
 
-            // Sum of INCLUDE rates for this item (used in INCLUDE formula denominator)
+            // Sum of INCLUDE rates for this item
             val sumIncludeRates = itemTaxes
                 .filter { it.mode == TaxMode.INCLUDE }
                 .sumOfDecimal { it.rate }
+
+            // Strip embedded inclusive taxes to get the net base.
+            // EXCLUDE taxes are levied on this net amount, not on the gross price
+            // (which still contains the inclusive-tax portion).
+            val inclusiveTaxBase: BigDecimal =
+                if (sumIncludeRates > ZERO)
+                    (s3.afterReceiptDiscount / (HUNDRED + sumIncludeRates) * HUNDRED).r2()
+                else
+                    s3.afterReceiptDiscount
 
             // Sort: BEFORE first, then AFTER
             val orderedTaxes = itemTaxes.filter { it.taxOrder == TaxOrder.BEFORE } +
                     itemTaxes.filter { it.taxOrder == TaxOrder.AFTER }
 
-            var previousTaxes = ZERO  // tracks cumulative EXCLUDE taxes for AFTER calculation
+            // Tracks cumulative EXCLUDE taxes for AFTER (tax-on-tax) calculation
+            var previousExclTaxes = ZERO
 
             val taxLines = orderedTaxes.map { tax ->
-                val taxableBase: BigDecimal = when (tax.taxOrder) {
-                    TaxOrder.BEFORE -> s3.afterReceiptDiscount
-                    TaxOrder.AFTER  -> (s3.afterReceiptDiscount + previousTaxes).r2()
+                val taxableBase: BigDecimal = when (tax.mode) {
+                    // INCLUDE: always uses the gross afterReceiptDiscount (the price as stated)
+                    TaxMode.INCLUDE -> s3.afterReceiptDiscount
+
+                    // EXCLUDE: uses the net-of-inclusive-tax base; AFTER variant adds
+                    // previously computed exclusive taxes on top (tax-on-tax)
+                    TaxMode.EXCLUDE -> when (tax.taxOrder) {
+                        TaxOrder.BEFORE -> inclusiveTaxBase
+                        TaxOrder.AFTER  -> (inclusiveTaxBase + previousExclTaxes).r2()
+                    }
                 }
 
                 val taxAmount: BigDecimal = when (tax.mode) {
@@ -277,9 +311,9 @@ class POSTaxCalculator(
                     }
                 }
 
-                // Accumulate for AFTER-type taxes
+                // Accumulate exclusive taxes for subsequent AFTER taxes
                 if (tax.mode == TaxMode.EXCLUDE) {
-                    previousTaxes = (previousTaxes + taxAmount).r2()
+                    previousExclTaxes = (previousExclTaxes + taxAmount).r2()
                 }
 
                 TaxLine(
@@ -296,9 +330,9 @@ class POSTaxCalculator(
             val totalExclTaxAmt = taxLines
                 .filter { it.taxMode == TaxMode.EXCLUDE }
                 .sumOfDecimal { it.taxAmount }
-            val totalAllTaxAmt  = taxLines.sumOfDecimal { it.taxAmount }
+            val totalAllTaxAmt = taxLines.sumOfDecimal { it.taxAmount }
 
-            ItemTaxResult(s3, taxLines, totalExclTaxAmt, totalAllTaxAmt)
+            ItemTaxResult(s3, inclusiveTaxBase, taxLines, totalExclTaxAmt, totalAllTaxAmt)
         }
 
         // ══════════════════════════════════════════════════════════════════════
@@ -327,7 +361,6 @@ class POSTaxCalculator(
         // ══════════════════════════════════════════════════════════════════════
 
         val processedItems = itemTaxResults.map { itr ->
-            val after = itr.s3.afterReceiptDiscount
             ProcessedItem(
                 item                   = itr.s3.s1.item,
                 gross                  = itr.s3.s1.gross,
@@ -335,11 +368,15 @@ class POSTaxCalculator(
                 totalLineDiscount      = itr.s3.s1.totalDiscount,
                 netAfterLine           = itr.s3.s1.netAfterLine,
                 receiptDiscountShare   = itr.s3.receiptDiscShare,
-                afterReceiptDiscount   = after,
+                afterReceiptDiscount   = itr.s3.afterReceiptDiscount,
+                // Net price after stripping embedded inclusive taxes — base for EXCLUDE taxes
+                inclusiveTaxBase       = itr.inclusiveTaxBase,
                 taxLines               = itr.taxLines,
-                totalExclTax           = after,
+                // Pre-exclusive-tax net amount
+                totalExclTax           = itr.inclusiveTaxBase,
                 totalTax               = itr.totalAllTaxAmt,
-                totalInclTax           = (after + itr.totalExclTaxAmt).r2()
+                // Final line total: net + all exclusive taxes added on top
+                totalInclTax           = (itr.inclusiveTaxBase + itr.totalExclTaxAmt).r2()
             )
         }
 

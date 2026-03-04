@@ -716,10 +716,10 @@ fun ReceiptItem(item: ProcessedItem) {
             Text("${item.item.qty.stripTrailingZeros()} × ${item.item.unitPrice.fmt()}",
                 fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = POSColors.Muted)
 
-            // Line discounts (from original base)
+            // Line discounts (computed from original base per spec)
             item.lineDiscountBreakdown.forEach { (disc, amount) ->
                 if (amount > BigDecimal.ZERO)
-                    SubRow("${disc.label.ifBlank { "Disc" }} (from orig. base)", amount, POSColors.Orange, negative = true)
+                    SubRow("${disc.label.ifBlank { "Disc" }} (orig base)", amount, POSColors.Orange, negative = true)
             }
             if (item.totalLineDiscount > BigDecimal.ZERO)
                 SubRow("After line disc", item.netAfterLine, POSColors.Orange)
@@ -728,17 +728,24 @@ fun ReceiptItem(item: ProcessedItem) {
             if (item.receiptDiscountShare > BigDecimal.ZERO)
                 SubRow("Receipt disc (LR alloc)", item.receiptDiscountShare, POSColors.Purple, negative = true)
 
-            // After receipt discount = pre-tax base
-            SubRow("Pre-tax base", item.afterReceiptDiscount, POSColors.Accent2)
+            // afterReceiptDiscount = gross price still containing embedded inclusive taxes
+            SubRow("After receipt disc (incl-tax price)", item.afterReceiptDiscount, POSColors.Muted)
 
-            // Tax lines (BEFORE order first, then AFTER)
+            // inclusiveTaxBase = price net of all embedded inclusive taxes
+            // This is the correct base for exclusive tax computation
+            if (item.afterReceiptDiscount != item.inclusiveTaxBase)
+                SubRow("Net of incl taxes (excl-tax base)", item.inclusiveTaxBase, POSColors.Accent2)
+
+            // Tax lines — BEFORE first, then AFTER (tax-on-tax)
             item.taxLines.forEach { line ->
                 if (line.taxAmount > BigDecimal.ZERO) {
                     val color    = if (line.taxMode == TaxMode.INCLUDE) POSColors.Amber else POSColors.Green
                     val modeTag  = if (line.taxMode == TaxMode.INCLUDE) "incl" else "excl"
-                    val orderTag = if (line.taxOrder == TaxOrder.AFTER) " ⚡" else ""
+                    val orderTag = if (line.taxOrder == TaxOrder.AFTER) " ⚡ToT" else ""
+                    // Show the base used so the calculation is fully transparent
+                    val baseTag  = " [base ${line.taxableBase.fmt()}]"
                     SubRow(
-                        label    = "${line.name} ${line.ratePercent.stripTrailingZeros().toPlainString()}% $modeTag$orderTag",
+                        label    = "${line.name} ${line.ratePercent.stripTrailingZeros().toPlainString()}% $modeTag$orderTag$baseTag",
                         value    = line.taxAmount,
                         color    = color,
                         positive = line.taxMode == TaxMode.EXCLUDE
@@ -749,15 +756,15 @@ fun ReceiptItem(item: ProcessedItem) {
             // Item totals
             Spacer(modifier = Modifier.height(2.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("excl-tax", fontSize = 10.sp, color = POSColors.Muted, fontFamily = FontFamily.Monospace)
+                Text("net (excl-tax base)", fontSize = 10.sp, color = POSColors.Muted, fontFamily = FontFamily.Monospace)
                 Text(item.totalExclTax.fmt(), fontSize = 10.sp, color = POSColors.Muted, fontFamily = FontFamily.Monospace)
             }
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("tax total", fontSize = 10.sp, color = POSColors.Muted, fontFamily = FontFamily.Monospace)
+                Text("tax total (incl+excl)", fontSize = 10.sp, color = POSColors.Muted, fontFamily = FontFamily.Monospace)
                 Text(item.totalTax.fmt(), fontSize = 10.sp, color = POSColors.Muted, fontFamily = FontFamily.Monospace)
             }
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("→ line total (excl+excl-tax)", fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                Text("→ line total (net + excl taxes)", fontSize = 11.sp, fontWeight = FontWeight.Bold,
                     fontFamily = FontFamily.Monospace, color = POSColors.Accent2)
                 Text(item.totalInclTax.fmt(), fontSize = 11.sp, fontWeight = FontWeight.Bold,
                     fontFamily = FontFamily.Monospace, color = POSColors.Accent2)
@@ -790,7 +797,7 @@ fun BalanceVerificationPanel(result: CalculationResult) {
             Text("✓ BALANCE VERIFICATION", fontSize = 10.sp, fontWeight = FontWeight.Bold,
                 letterSpacing = 0.6.sp, color = POSColors.Teal)
 
-            // Grand total check: Σ item.totalInclTax + fixedCharges == grandTotal
+            // Grand total check: Σ item.totalInclTax (= inclusiveTaxBase + exclTaxes) + fixed == grandTotal
             VerifyRow(
                 label    = "Σ item.totalInclTax + fixed",
                 lhs      = grandTotalCheck,
