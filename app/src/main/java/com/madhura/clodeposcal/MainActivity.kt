@@ -5,7 +5,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
@@ -13,12 +12,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -29,7 +30,9 @@ import com.madhura.clodeposcal.ui.theme.ClodePOSCalTheme
 import java.math.BigDecimal
 import java.util.UUID
 
-
+// ─────────────────────────────────────────────────────────────────────────────
+// Activity
+// ─────────────────────────────────────────────────────────────────────────────
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -46,7 +49,7 @@ class MainActivity : ComponentActivity() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Color Scheme
+// Color Palette
 // ─────────────────────────────────────────────────────────────────────────────
 
 object POSColors {
@@ -68,13 +71,13 @@ object POSColors {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Main Screen
+// Root Screen
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
 fun POSTaxCalculatorScreen() {
 
-    // ── Global catalogues ─────────────────────────────────────────────────────
+    // ── Line-discount catalogue ───────────────────────────────────────────────
     var lineDiscounts by remember {
         mutableStateOf(
             listOf(
@@ -85,49 +88,50 @@ fun POSTaxCalculatorScreen() {
         )
     }
 
+    // ── Tax catalogue  (taxOrder replaces the old taxOnTax Boolean) ───────────
     var taxes by remember {
         mutableStateOf(
             listOf(
-                Tax("inc1",     "Inc1",     BigDecimal("5"), TaxMode.INCLUDE, false),
-                Tax("inc2", "Inc2", BigDecimal("10"),  TaxMode.INCLUDE, false),
-                Tax("service", "Service", BigDecimal("10"),  TaxMode.EXCLUDE, false),
-                Tax("gst", "GST", BigDecimal("18"),  TaxMode.EXCLUDE, false),
+                Tax("inc1",    "Inc1",    BigDecimal("5"),  TaxMode.INCLUDE, TaxOrder.BEFORE),
+                Tax("inc2",    "Inc2",    BigDecimal("10"), TaxMode.INCLUDE, TaxOrder.BEFORE),
+                Tax("service", "Service", BigDecimal("10"), TaxMode.EXCLUDE, TaxOrder.BEFORE),
+                Tax("gst",     "GST",     BigDecimal("18"), TaxMode.EXCLUDE, TaxOrder.BEFORE)
             )
         )
     }
 
-    // ── Items — reference catalogues by id ────────────────────────────────────
+    // ── Items ─────────────────────────────────────────────────────────────────
     var items by remember {
         mutableStateOf(
             listOf(
                 Item("1", "Product A", BigDecimal("1"), BigDecimal("390.00"),
                     appliedDiscountIds = emptySet(),
-                    appliedTaxIds      = setOf("inc1", "inc2", "service", "gst")
-                ),
+                    appliedTaxIds      = setOf("inc1", "inc2", "service", "gst")),
                 Item("2", "Product B", BigDecimal("1"), BigDecimal("315.00"),
                     appliedDiscountIds = emptySet(),
-                    appliedTaxIds      = setOf("inc1", "inc2", "service", "gst")
-                ),
+                    appliedTaxIds      = setOf("inc1", "inc2", "service", "gst")),
                 Item("3", "Product C", BigDecimal("1"), BigDecimal("70.00"),
                     appliedDiscountIds = emptySet(),
-                    appliedTaxIds      = setOf("inc1", "inc2", "service", "gst")
-                )
+                    appliedTaxIds      = setOf("inc1", "inc2", "service", "gst"))
             )
         )
     }
 
+    // ── Receipt discounts ─────────────────────────────────────────────────────
     var receiptDiscounts by remember {
         mutableStateOf(
             listOf(Discount(UUID.randomUUID().toString(), "Loyalty", DiscountType.PERCENT, BigDecimal.ZERO))
         )
     }
 
+    // ── Fixed charges ─────────────────────────────────────────────────────────
     var fixedCharges by remember {
         mutableStateOf(
             listOf(FixedCharge(UUID.randomUUID().toString(), "Service Fee", BigDecimal.ZERO))
         )
     }
 
+    // ── Reactive calculation ──────────────────────────────────────────────────
     val result = remember(items, lineDiscounts, taxes, receiptDiscounts, fixedCharges) {
         POSTaxCalculator(items, lineDiscounts, taxes, receiptDiscounts, fixedCharges).calculate()
     }
@@ -145,6 +149,7 @@ fun POSTaxCalculatorScreen() {
         Scaffold(containerColor = POSColors.Background) { padding ->
             Row(modifier = Modifier.fillMaxSize().padding(padding)) {
 
+                // Left — inputs
                 Box(modifier = Modifier.weight(1f).fillMaxHeight().background(POSColors.Background)) {
                     InputPanel(
                         items            = items,
@@ -152,39 +157,34 @@ fun POSTaxCalculatorScreen() {
                         taxes            = taxes,
                         receiptDiscounts = receiptDiscounts,
                         fixedCharges     = fixedCharges,
-                        // line-discount catalogue CRUD
                         onAddLineDiscount    = {
                             lineDiscounts = lineDiscounts + Discount(UUID.randomUUID().toString(), "", DiscountType.PERCENT, BigDecimal.ZERO)
                         },
                         onUpdateLineDiscount = { id, d -> lineDiscounts = lineDiscounts.map { if (it.id == id) d else it } },
                         onDeleteLineDiscount = { id ->
                             lineDiscounts = lineDiscounts.filter { it.id != id }
-                            // Remove orphan id from every item
                             items = items.map { it.copy(appliedDiscountIds = it.appliedDiscountIds - id) }
                         },
-                        // item CRUD
                         onAddItem    = { items = items + Item(UUID.randomUUID().toString(), "", BigDecimal.ONE, BigDecimal.ZERO) },
                         onUpdateItem = { id, it -> items = items.map { item -> if (item.id == id) it else item } },
                         onDeleteItem = { id -> items = items.filter { it.id != id } },
-                        // tax catalogue CRUD
-                        onAddTax    = { taxes = taxes + Tax(UUID.randomUUID().toString(), "", BigDecimal.ZERO, TaxMode.EXCLUDE, false) },
-                        onUpdateTax = { id, it -> taxes = taxes.map { t -> if (t.id == id) it else t } },
-                        onDeleteTax = { id ->
+                        onAddTax     = { taxes = taxes + Tax(UUID.randomUUID().toString(), "", BigDecimal.ZERO, TaxMode.EXCLUDE, TaxOrder.BEFORE) },
+                        onUpdateTax  = { id, it -> taxes = taxes.map { t -> if (t.id == id) it else t } },
+                        onDeleteTax  = { id ->
                             taxes = taxes.filter { it.id != id }
                             items = items.map { it.copy(appliedTaxIds = it.appliedTaxIds - id) }
                         },
-                        // receipt discount CRUD
                         onAddReceiptDiscount    = { receiptDiscounts = receiptDiscounts + Discount(UUID.randomUUID().toString(), "", DiscountType.PERCENT, BigDecimal.ZERO) },
                         onUpdateReceiptDiscount = { id, it -> receiptDiscounts = receiptDiscounts.map { d -> if (d.id == id) it else d } },
                         onDeleteReceiptDiscount = { id -> receiptDiscounts = receiptDiscounts.filter { it.id != id } },
-                        // fixed charge CRUD
-                        onAddFixedCharge    = { fixedCharges = fixedCharges + FixedCharge(UUID.randomUUID().toString(), "Charge", BigDecimal.ZERO) },
-                        onUpdateFixedCharge = { id, it -> fixedCharges = fixedCharges.map { fc -> if (fc.id == id) it else fc } },
-                        onDeleteFixedCharge = { id -> fixedCharges = fixedCharges.filter { it.id != id } }
+                        onAddFixedCharge        = { fixedCharges = fixedCharges + FixedCharge(UUID.randomUUID().toString(), "Charge", BigDecimal.ZERO) },
+                        onUpdateFixedCharge     = { id, it -> fixedCharges = fixedCharges.map { fc -> if (fc.id == id) it else fc } },
+                        onDeleteFixedCharge     = { id -> fixedCharges = fixedCharges.filter { it.id != id } }
                     )
                 }
 
-                Box(modifier = Modifier.width(420.dp).fillMaxHeight().background(POSColors.Surface)) {
+                // Right — receipt
+                Box(modifier = Modifier.width(440.dp).fillMaxHeight().background(POSColors.Surface)) {
                     ReceiptPanel(result)
                 }
             }
@@ -234,7 +234,7 @@ fun InputPanel(
                     Text("Tax Calculator", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = POSColors.Text)
                     Surface(color = POSColors.Surface, shape = RoundedCornerShape(20.dp),
                         border = androidx.compose.foundation.BorderStroke(1.dp, POSColors.Border)) {
-                        Text("🔄 Aggregate + Round Robin",
+                        Text("🔢 Largest-Remainder Distribution",
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                             fontSize = 10.sp, color = POSColors.Muted)
                     }
@@ -280,19 +280,19 @@ fun InputPanel(
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("NAME",  modifier = Modifier.weight(1f), style = ColumnHeaderStyle)
-                        Text("QTY",   modifier = Modifier.width(70.dp), style = ColumnHeaderStyle, textAlign = TextAlign.End)
-                        Text("PRICE", modifier = Modifier.width(90.dp), style = ColumnHeaderStyle, textAlign = TextAlign.End)
-                        Text("GROSS", modifier = Modifier.width(80.dp), style = ColumnHeaderStyle, textAlign = TextAlign.End)
+                        Text("NAME",  modifier = Modifier.weight(1f),       style = ColumnHeaderStyle)
+                        Text("QTY",   modifier = Modifier.width(70.dp),     style = ColumnHeaderStyle, textAlign = TextAlign.End)
+                        Text("PRICE", modifier = Modifier.width(90.dp),     style = ColumnHeaderStyle, textAlign = TextAlign.End)
+                        Text("GROSS", modifier = Modifier.width(80.dp),     style = ColumnHeaderStyle, textAlign = TextAlign.End)
                         Spacer(modifier = Modifier.width(36.dp))
                     }
                     items.forEach { item ->
                         ItemCard(
-                            item          = item,
-                            allDiscounts  = lineDiscounts,
-                            allTaxes      = taxes,
-                            onUpdate      = { onUpdateItem(item.id, it) },
-                            onDelete      = { onDeleteItem(item.id) }
+                            item         = item,
+                            allDiscounts = lineDiscounts,
+                            allTaxes     = taxes,
+                            onUpdate     = { onUpdateItem(item.id, it) },
+                            onDelete     = { onDeleteItem(item.id) }
                         )
                     }
                 }
@@ -335,7 +335,7 @@ fun InputPanel(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Item Card  — checkbox panels for discounts AND taxes
+// Item Card
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
@@ -353,71 +353,84 @@ fun ItemCard(
     ) {
         Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
 
-            // ── Name / Qty / Price / Gross / Delete ───────────────────────────
+            // Name / Qty / Price / Gross / Delete
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                POSTextField(value = item.name, onValueChange = { onUpdate(item.copy(name = it)) },
-                    modifier = Modifier.weight(1f), placeholder = "Item name")
                 POSTextField(
-                    value = item.qty.toPlainString(),
-                    onValueChange = { runCatching { onUpdate(item.copy(qty = BigDecimal(it))) } },
-                    modifier = Modifier.width(70.dp), keyboardType = KeyboardType.Decimal, textAlign = TextAlign.End
+                    value         = item.name,
+                    onValueChange = { onUpdate(item.copy(name = it)) },
+                    modifier      = Modifier.weight(1f),
+                    placeholder   = "Item name"
                 )
                 POSTextField(
-                    value = item.unitPrice.toPlainString(),
+                    value         = item.qty.toPlainString(),
+                    onValueChange = { runCatching { onUpdate(item.copy(qty = BigDecimal(it))) } },
+                    modifier      = Modifier.width(70.dp),
+                    keyboardType  = KeyboardType.Decimal,
+                    textAlign     = TextAlign.End
+                )
+                POSTextField(
+                    value         = item.unitPrice.toPlainString(),
                     onValueChange = { runCatching { onUpdate(item.copy(unitPrice = BigDecimal(it))) } },
-                    modifier = Modifier.width(90.dp), keyboardType = KeyboardType.Decimal, textAlign = TextAlign.End
+                    modifier      = Modifier.width(90.dp),
+                    keyboardType  = KeyboardType.Decimal,
+                    textAlign     = TextAlign.End
                 )
                 Text(
                     (item.qty * item.unitPrice).setScale(2, java.math.RoundingMode.HALF_UP).toPlainString(),
-                    modifier = Modifier.width(80.dp),
-                    fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = POSColors.Text, textAlign = TextAlign.End
+                    modifier     = Modifier.width(80.dp),
+                    fontFamily   = FontFamily.Monospace,
+                    fontSize     = 12.sp,
+                    color        = POSColors.Text,
+                    textAlign    = TextAlign.End
                 )
                 IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
                     Icon(Icons.Default.Delete, "Delete", tint = POSColors.Red, modifier = Modifier.size(18.dp))
                 }
             }
 
-            // ── Line Discounts checkboxes ─────────────────────────────────────
+            // Line-discount checkboxes
             CheckboxPanel(
-                title        = "LINE DISCOUNTS",
-                emptyLabel   = "No discounts defined in catalogue",
-                badgeLabel   = "No Discount",
-                badgeColor   = POSColors.Orange,
-                isEmpty      = item.appliedDiscountIds.isEmpty(),
-                accentColor  = POSColors.Orange,
-                rows = allDiscounts.map { disc ->
+                title       = "LINE DISCOUNTS",
+                emptyLabel  = "No discounts defined in catalogue",
+                badgeLabel  = "No Discount",
+                badgeColor  = POSColors.Orange,
+                isEmpty     = item.appliedDiscountIds.isEmpty(),
+                accentColor = POSColors.Orange,
+                rows        = allDiscounts.map { disc ->
                     CheckboxRow(
                         id      = disc.id,
                         checked = disc.id in item.appliedDiscountIds,
                         label   = disc.label.ifBlank { "Unnamed discount" },
-                        detail  = "${disc.value}${if (disc.type == DiscountType.PERCENT) "%" else "$"} off"
+                        detail  = "${disc.value.stripTrailingZeros().toPlainString()}${if (disc.type == DiscountType.PERCENT) "%" else "$"} off"
                     )
                 },
-                onToggle = { discId, checked ->
-                    val newIds = if (checked) item.appliedDiscountIds + discId else item.appliedDiscountIds - discId
-                    onUpdate(item.copy(appliedDiscountIds = newIds))
+                onToggle = { id, checked ->
+                    val ids = if (checked) item.appliedDiscountIds + id else item.appliedDiscountIds - id
+                    onUpdate(item.copy(appliedDiscountIds = ids))
                 }
             )
 
-            // ── Tax checkboxes ────────────────────────────────────────────────
+            // Tax checkboxes
             CheckboxPanel(
-                title        = "TAXES APPLIED",
-                emptyLabel   = "No taxes defined in catalogue",
-                badgeLabel   = "Tax-Free",
-                badgeColor   = POSColors.Amber,
-                isEmpty      = item.appliedTaxIds.isEmpty(),
-                accentColor  = POSColors.Green,
-                rows = allTaxes.map { tax ->
+                title       = "TAXES APPLIED",
+                emptyLabel  = "No taxes defined in catalogue",
+                badgeLabel  = "Tax-Free",
+                badgeColor  = POSColors.Amber,
+                isEmpty     = item.appliedTaxIds.isEmpty(),
+                accentColor = POSColors.Green,
+                rows        = allTaxes.map { tax ->
                     CheckboxRow(
                         id      = tax.id,
                         checked = tax.id in item.appliedTaxIds,
                         label   = tax.name.ifBlank { "Unnamed tax" },
-                        detail  = "${tax.rate}% ${if (tax.mode == TaxMode.INCLUDE) "(incl)" else "(excl)"}"
+                        detail  = "${tax.rate.stripTrailingZeros().toPlainString()}% " +
+                                "${if (tax.mode == TaxMode.INCLUDE) "(incl)" else "(excl)"} " +
+                                "${if (tax.taxOrder == TaxOrder.AFTER) "⚡ToT" else ""}"
                     )
                 },
-                onToggle = { taxId, checked ->
-                    val newIds = if (checked) item.appliedTaxIds + taxId else item.appliedTaxIds - taxId
-                    onUpdate(item.copy(appliedTaxIds = newIds))
+                onToggle = { id, checked ->
+                    val ids = if (checked) item.appliedTaxIds + id else item.appliedTaxIds - id
+                    onUpdate(item.copy(appliedTaxIds = ids))
                 }
             )
         }
@@ -425,7 +438,7 @@ fun ItemCard(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Generic Checkbox Panel (shared by discounts and taxes)
+// Checkbox Panel
 // ─────────────────────────────────────────────────────────────────────────────
 
 data class CheckboxRow(val id: String, val checked: Boolean, val label: String, val detail: String)
@@ -448,11 +461,9 @@ fun CheckboxPanel(
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
+        Row(modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+            verticalAlignment = Alignment.CenterVertically) {
             Text(title, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp, color = POSColors.Muted)
             if (isEmpty) {
                 Surface(color = badgeColor.copy(alpha = 0.15f), shape = RoundedCornerShape(4.dp)) {
@@ -461,21 +472,18 @@ fun CheckboxPanel(
                 }
             }
         }
-
         if (rows.isEmpty()) {
             Text(emptyLabel, fontSize = 11.sp, color = POSColors.Muted)
         } else {
             rows.forEach { row ->
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
+                Row(verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
+                    modifier = Modifier.fillMaxWidth()) {
                     Checkbox(
-                        checked = row.checked,
-                        onCheckedChange = { onToggle(row.id, it) },
-                        modifier = Modifier.size(20.dp),
-                        colors = CheckboxDefaults.colors(
+                        checked           = row.checked,
+                        onCheckedChange   = { onToggle(row.id, it) },
+                        modifier          = Modifier.size(20.dp),
+                        colors            = CheckboxDefaults.colors(
                             checkedColor   = accentColor,
                             uncheckedColor = POSColors.Border2
                         )
@@ -489,7 +497,7 @@ fun CheckboxPanel(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Catalogue Discount Row  (used for line-discount catalogue AND receipt discounts)
+// Catalogue Discount Row
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
@@ -499,15 +507,17 @@ fun CatalogueDiscountRow(discount: Discount, onUpdate: (Discount) -> Unit, onDel
             modifier = Modifier.weight(1f), placeholder = "Label")
         ToggleGroup(
             options  = listOf("%" to DiscountType.PERCENT, "$" to DiscountType.FIXED),
-            selected = discount.type, onSelect = { onUpdate(discount.copy(type = it)) },
+            selected = discount.type,
+            onSelect = { onUpdate(discount.copy(type = it)) },
             modifier = Modifier.width(90.dp)
         )
         POSTextField(
-            value = discount.value.toPlainString(),
+            value         = discount.value.toPlainString(),
             onValueChange = { runCatching { onUpdate(discount.copy(value = BigDecimal(it))) } },
-            modifier = Modifier.width(100.dp), keyboardType = KeyboardType.Decimal,
-            suffix = if (discount.type == DiscountType.PERCENT) "%" else "$",
-            textAlign = TextAlign.End
+            modifier      = Modifier.width(100.dp),
+            keyboardType  = KeyboardType.Decimal,
+            suffix        = if (discount.type == DiscountType.PERCENT) "%" else "$",
+            textAlign     = TextAlign.End
         )
         IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
             Icon(Icons.Default.Delete, "Delete", tint = POSColors.Red, modifier = Modifier.size(18.dp))
@@ -516,32 +526,53 @@ fun CatalogueDiscountRow(discount: Discount, onUpdate: (Discount) -> Unit, onDel
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Tax Row
+// Tax Row  — now has BEFORE / AFTER (TaxOrder) toggle instead of Base / ToT
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
 fun TaxRow(tax: Tax, onUpdate: (Tax) -> Unit, onDelete: () -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            POSTextField(value = tax.name, onValueChange = { onUpdate(tax.copy(name = it)) },
-                modifier = Modifier.weight(1f), placeholder = "Tax name")
+            // Name
             POSTextField(
-                value = tax.rate.toPlainString(),
-                onValueChange = { runCatching { onUpdate(tax.copy(rate = BigDecimal(it))) } },
-                modifier = Modifier.width(80.dp), keyboardType = KeyboardType.Decimal,
-                suffix = "%", textAlign = TextAlign.End
+                value         = tax.name,
+                onValueChange = { onUpdate(tax.copy(name = it)) },
+                modifier      = Modifier.weight(1f),
+                placeholder   = "Tax name"
             )
-            ToggleGroup(options = listOf("Excl" to TaxMode.EXCLUDE, "Incl" to TaxMode.INCLUDE),
-                selected = tax.mode, onSelect = { onUpdate(tax.copy(mode = it)) }, modifier = Modifier.width(120.dp))
-            ToggleGroup(options = listOf("Base" to false, "ToT" to true),
-                selected = tax.taxOnTax, onSelect = { onUpdate(tax.copy(taxOnTax = it)) }, modifier = Modifier.width(120.dp))
+            // Rate
+            POSTextField(
+                value         = tax.rate.toPlainString(),
+                onValueChange = { runCatching { onUpdate(tax.copy(rate = BigDecimal(it))) } },
+                modifier      = Modifier.width(80.dp),
+                keyboardType  = KeyboardType.Decimal,
+                suffix        = "%",
+                textAlign     = TextAlign.End
+            )
+            // Mode: Excl / Incl
+            ToggleGroup(
+                options  = listOf("Excl" to TaxMode.EXCLUDE, "Incl" to TaxMode.INCLUDE),
+                selected = tax.mode,
+                onSelect = { onUpdate(tax.copy(mode = it)) },
+                modifier = Modifier.width(120.dp)
+            )
+            // Order: Before / After (tax-on-tax)
+            ToggleGroup(
+                options  = listOf("Before" to TaxOrder.BEFORE, "After" to TaxOrder.AFTER),
+                selected = tax.taxOrder,
+                onSelect = { onUpdate(tax.copy(taxOrder = it)) },
+                modifier = Modifier.width(140.dp)
+            )
+            // Delete
             IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
                 Icon(Icons.Default.Delete, "Delete", tint = POSColors.Red, modifier = Modifier.size(18.dp))
             }
         }
-        if (tax.taxOnTax)
-            Text("⚡ Tax-on-Tax: Base includes previous exclusive taxes",
-                fontSize = 10.sp, color = POSColors.Amber, modifier = Modifier.padding(start = 8.dp))
+        if (tax.taxOrder == TaxOrder.AFTER)
+            Text(
+                "⚡ Tax-on-Tax: base = afterReceiptDiscount + previous EXCLUDE taxes",
+                fontSize = 10.sp, color = POSColors.Amber, modifier = Modifier.padding(start = 8.dp)
+            )
     }
 }
 
@@ -555,10 +586,12 @@ fun FixedChargeRow(charge: FixedCharge, onUpdate: (FixedCharge) -> Unit, onDelet
         POSTextField(value = charge.label, onValueChange = { onUpdate(charge.copy(label = it)) },
             modifier = Modifier.weight(1f), placeholder = "Label")
         POSTextField(
-            value = charge.value.toPlainString(),
+            value         = charge.value.toPlainString(),
             onValueChange = { runCatching { onUpdate(charge.copy(value = BigDecimal(it))) } },
-            modifier = Modifier.width(120.dp), keyboardType = KeyboardType.Decimal,
-            prefix = "$", textAlign = TextAlign.End
+            modifier      = Modifier.width(120.dp),
+            keyboardType  = KeyboardType.Decimal,
+            prefix        = "$",
+            textAlign     = TextAlign.End
         )
         IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
             Icon(Icons.Default.Delete, "Delete", tint = POSColors.Red, modifier = Modifier.size(18.dp))
@@ -574,91 +607,98 @@ fun FixedChargeRow(charge: FixedCharge, onUpdate: (FixedCharge) -> Unit, onDelet
 fun ReceiptPanel(result: CalculationResult) {
     Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
 
+        // Header bar
         Box(modifier = Modifier.fillMaxWidth().background(POSColors.Surface)
             .padding(vertical = 16.dp, horizontal = 20.dp)) {
-            Text("RECEIPT", fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp, color = POSColors.Muted)
+            Text("RECEIPT", fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                letterSpacing = 1.sp, color = POSColors.Muted)
         }
 
         Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
 
-            result.items.forEach { item -> ReceiptItem(item, result.taxResults) }
+            // ── Per-item breakdown ────────────────────────────────────────────
+            result.items.forEach { item -> ReceiptItem(item) }
 
             Divider(color = POSColors.Border2, modifier = Modifier.padding(vertical = 8.dp))
 
+            // ── Subtotals ─────────────────────────────────────────────────────
             ReceiptRow("Gross Total", result.grossTotal, POSColors.Accent2)
+
             if (result.totalLineDiscount > BigDecimal.ZERO)
                 ReceiptRow("Line Discounts", result.totalLineDiscount, POSColors.Red, negative = true)
-            ReceiptRow("Subtotal (1)", result.subtotal1)
+
+            ReceiptRow("Subtotal (1) — after line discounts", result.subtotal1)
 
             result.receiptDiscountAmounts.forEach { (disc, amount) ->
                 if (amount > BigDecimal.ZERO) {
-                    val suffix = if (disc.type == DiscountType.PERCENT) " (${disc.value}%)" else ""
+                    val suffix = if (disc.type == DiscountType.PERCENT) " (${disc.value.stripTrailingZeros().toPlainString()}%)" else ""
                     ReceiptRow("${disc.label.ifBlank { "Receipt Discount" }}$suffix", amount, POSColors.Purple, negative = true)
                 }
             }
-            if (result.totalReceiptDiscountAmount > BigDecimal.ZERO)
-                ReceiptRow("Subtotal (2)", result.subtotal2, fontWeight = FontWeight.Bold)
 
+            if (result.totalReceiptDiscountAmount > BigDecimal.ZERO)
+                ReceiptRow("Subtotal (2) — after receipt discounts", result.subtotal2, fontWeight = FontWeight.Bold)
+
+            // ── Taxes ─────────────────────────────────────────────────────────
             if (result.taxResults.isNotEmpty()) {
                 Divider(color = POSColors.Border2, modifier = Modifier.padding(vertical = 8.dp))
-                result.taxResults.forEach { tax ->
-                    val color = if (tax.tax.mode == TaxMode.INCLUDE) POSColors.Amber else POSColors.Green
-                    ReceiptRow(tax.tax.name, tax.amount, color, positive = true)
+                result.taxResults.forEach { taxResult ->
+                    val color = if (taxResult.tax.mode == TaxMode.INCLUDE) POSColors.Amber else POSColors.Green
+                    val modeTag  = if (taxResult.tax.mode == TaxMode.INCLUDE) "incl" else "excl"
+                    val orderTag = if (taxResult.tax.taxOrder == TaxOrder.AFTER) " ⚡ToT" else ""
+                    ReceiptRow(
+                        label    = "${taxResult.tax.name} (${taxResult.tax.rate.stripTrailingZeros().toPlainString()}% $modeTag$orderTag)",
+                        value    = taxResult.amount,
+                        color    = color,
+                        positive = taxResult.tax.mode == TaxMode.EXCLUDE
+                    )
                 }
                 if (result.exclusiveTaxTotal > BigDecimal.ZERO)
-                    ReceiptRow("Total Tax", result.exclusiveTaxTotal, POSColors.Green, fontWeight = FontWeight.Bold)
+                    ReceiptRow("Total Exclusive Tax", result.exclusiveTaxTotal, POSColors.Green, fontWeight = FontWeight.Bold, positive = true)
+                if (result.inclusiveTaxTotal > BigDecimal.ZERO)
+                    ReceiptRow("Total Inclusive Tax (embedded)", result.inclusiveTaxTotal, POSColors.Amber)
             }
 
+            // ── Fixed charges ─────────────────────────────────────────────────
             if (result.fixedCharges.isNotEmpty()) {
                 Divider(color = POSColors.Border2, modifier = Modifier.padding(vertical = 8.dp))
                 result.fixedCharges.forEach { (fc, amount) ->
-                    if (amount > BigDecimal.ZERO) ReceiptRow(fc.label, amount, POSColors.Teal, positive = true)
+                    if (amount > BigDecimal.ZERO)
+                        ReceiptRow(fc.label, amount, POSColors.Teal, positive = true)
                 }
                 if (result.totalFixedChargeAmount > BigDecimal.ZERO)
-                    ReceiptRow("Total Fixed", result.totalFixedChargeAmount, POSColors.Teal, fontWeight = FontWeight.Bold)
+                    ReceiptRow("Total Fixed Charges", result.totalFixedChargeAmount, POSColors.Teal, fontWeight = FontWeight.Bold, positive = true)
             }
 
+            // ── Grand total ───────────────────────────────────────────────────
             Divider(color = POSColors.Border2, thickness = 2.dp, modifier = Modifier.padding(vertical = 8.dp))
             Row(modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
-                horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically) {
                 Text("GRAND TOTAL", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = POSColors.Text)
-                Text(result.grandTotal.format(), fontSize = 22.sp, fontWeight = FontWeight.Bold,
+                Text(result.grandTotal.fmt(), fontSize = 22.sp, fontWeight = FontWeight.Bold,
                     fontFamily = FontFamily.Monospace, color = POSColors.Green)
             }
 
-            // Round-robin verification
-            Surface(modifier = Modifier.fillMaxWidth(), color = POSColors.Teal.copy(alpha = 0.07f),
-                shape = RoundedCornerShape(8.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, POSColors.Teal.copy(alpha = 0.2f))) {
-                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("🔄 ROUND ROBIN VERIFICATION", fontSize = 10.sp, fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.6.sp, color = POSColors.Teal)
-                    result.taxResults.forEach { tax ->
-                        val rrSum = result.items.sumOfDecimal { it.taxByTaxId[tax.tax.id] ?: BigDecimal.ZERO }
-                        val match = kotlin.math.abs((rrSum - tax.amount).toDouble()) < 0.001
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("${tax.tax.name} RR Σ", fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = POSColors.Muted)
-                            Text("${rrSum.format()} = ${tax.amount.format()} ${if (match) "✅" else "⚠️"}",
-                                fontSize = 11.sp, fontFamily = FontFamily.Monospace,
-                                color = if (match) POSColors.Teal else POSColors.Red)
-                        }
-                    }
-                }
-            }
+            // ── Balance verification panel ────────────────────────────────────
+            BalanceVerificationPanel(result)
         }
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Receipt Item
+// Receipt Item breakdown
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-fun ReceiptItem(item: ProcessedItem, taxResults: List<TaxResult>) {
-    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 5.dp),
-        verticalArrangement = Arrangement.spacedBy(1.dp)) {
-
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+fun ReceiptItem(item: ProcessedItem) {
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 5.dp),
+        verticalArrangement = Arrangement.spacedBy(1.dp)
+    ) {
+        // Item name row with gross
+        Row(modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically) {
             Text(item.item.name.ifBlank { "—" }, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = POSColors.Text)
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -668,62 +708,172 @@ fun ReceiptItem(item: ProcessedItem, taxResults: List<TaxResult>) {
                             fontSize = 9.sp, fontWeight = FontWeight.Bold, color = POSColors.Amber)
                     }
                 }
-                Text(item.gross.format(), fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = POSColors.Muted)
+                Text(item.gross.fmt(), fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = POSColors.Muted)
             }
         }
 
         Column(modifier = Modifier.padding(start = 10.dp), verticalArrangement = Arrangement.spacedBy(1.dp)) {
-            Text("${item.item.qty.stripTrailingZeros()} × ${item.item.unitPrice.format()}",
+            Text("${item.item.qty.stripTrailingZeros()} × ${item.item.unitPrice.fmt()}",
                 fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = POSColors.Muted)
 
-            // Line discounts from catalogue
+            // Line discounts (from original base)
             item.lineDiscountBreakdown.forEach { (disc, amount) ->
                 if (amount > BigDecimal.ZERO)
-                    ReceiptSubRow(disc.label.ifBlank { "Disc" }, amount, POSColors.Orange, negative = true)
+                    SubRow("${disc.label.ifBlank { "Disc" }} (from orig. base)", amount, POSColors.Orange, negative = true)
             }
+            if (item.totalLineDiscount > BigDecimal.ZERO)
+                SubRow("After line disc", item.netAfterLine, POSColors.Orange)
 
-            // Receipt discount allocations
-            item.receiptDiscountAllocBreakdown.forEach { (disc, amount) ->
-                if (amount > BigDecimal.ZERO)
-                    ReceiptSubRow(disc.label.ifBlank { "Receipt Disc" }, amount, POSColors.Purple, negative = true)
-            }
+            // Receipt discount share (largest-remainder allocation)
+            if (item.receiptDiscountShare > BigDecimal.ZERO)
+                SubRow("Receipt disc (LR alloc)", item.receiptDiscountShare, POSColors.Purple, negative = true)
 
-            // Taxes
-            item.taxByTaxId.forEach { (taxId, amount) ->
-                if (amount > BigDecimal.ZERO) {
-                    val tax   = taxResults.find { it.tax.id == taxId }
-                    val color = if (tax?.tax?.mode == TaxMode.INCLUDE) POSColors.Amber else POSColors.Green
-                    ReceiptSubRow(tax?.tax?.name ?: taxId, amount, color, positive = true)
+            // After receipt discount = pre-tax base
+            SubRow("Pre-tax base", item.afterReceiptDiscount, POSColors.Accent2)
+
+            // Tax lines (BEFORE order first, then AFTER)
+            item.taxLines.forEach { line ->
+                if (line.taxAmount > BigDecimal.ZERO) {
+                    val color    = if (line.taxMode == TaxMode.INCLUDE) POSColors.Amber else POSColors.Green
+                    val modeTag  = if (line.taxMode == TaxMode.INCLUDE) "incl" else "excl"
+                    val orderTag = if (line.taxOrder == TaxOrder.AFTER) " ⚡" else ""
+                    SubRow(
+                        label    = "${line.name} ${line.ratePercent.stripTrailingZeros().toPlainString()}% $modeTag$orderTag",
+                        value    = line.taxAmount,
+                        color    = color,
+                        positive = line.taxMode == TaxMode.EXCLUDE
+                    )
                 }
             }
 
-            Text("→ ${item.lineTotal.format()}", fontSize = 11.sp, fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Bold, color = POSColors.Accent2)
+            // Item totals
+            Spacer(modifier = Modifier.height(2.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("excl-tax", fontSize = 10.sp, color = POSColors.Muted, fontFamily = FontFamily.Monospace)
+                Text(item.totalExclTax.fmt(), fontSize = 10.sp, color = POSColors.Muted, fontFamily = FontFamily.Monospace)
+            }
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("tax total", fontSize = 10.sp, color = POSColors.Muted, fontFamily = FontFamily.Monospace)
+                Text(item.totalTax.fmt(), fontSize = 10.sp, color = POSColors.Muted, fontFamily = FontFamily.Monospace)
+            }
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("→ line total (excl+excl-tax)", fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace, color = POSColors.Accent2)
+                Text(item.totalInclTax.fmt(), fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace, color = POSColors.Accent2)
+            }
         }
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Reusable Components
+// Balance Verification Panel
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-fun ReceiptSubRow(label: String, value: BigDecimal, color: Color, negative: Boolean = false, positive: Boolean = false) {
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(label, fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = POSColors.Muted)
-        Text("${if (negative) "-" else if (positive) "+" else ""}${value.format()}",
-            fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = color)
+fun BalanceVerificationPanel(result: CalculationResult) {
+    val itemInclTaxSum = result.items.sumOfDecimal { it.totalInclTax }
+    val grandTotalCheck = (itemInclTaxSum + result.totalFixedChargeAmount)
+        .setScale(2, java.math.RoundingMode.HALF_UP)
+    val receiptDiscCheck = result.items.sumOfDecimal { it.receiptDiscountShare }
+
+    val grandMatch   = grandTotalCheck.compareTo(result.grandTotal) == 0
+    val receiptMatch = receiptDiscCheck.compareTo(result.totalReceiptDiscountAmount) == 0
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color    = POSColors.Teal.copy(alpha = 0.07f),
+        shape    = RoundedCornerShape(8.dp),
+        border   = androidx.compose.foundation.BorderStroke(1.dp, POSColors.Teal.copy(alpha = 0.2f))
+    ) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("✓ BALANCE VERIFICATION", fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                letterSpacing = 0.6.sp, color = POSColors.Teal)
+
+            // Grand total check: Σ item.totalInclTax + fixedCharges == grandTotal
+            VerifyRow(
+                label    = "Σ item.totalInclTax + fixed",
+                lhs      = grandTotalCheck,
+                rhs      = result.grandTotal,
+                match    = grandMatch,
+                rhsLabel = "grandTotal"
+            )
+
+            // Receipt discount check: Σ item.receiptDiscountShare == totalReceiptDiscountAmount
+            VerifyRow(
+                label    = "Σ receiptDiscShare (LR)",
+                lhs      = receiptDiscCheck,
+                rhs      = result.totalReceiptDiscountAmount,
+                match    = receiptMatch,
+                rhsLabel = "totalReceiptDisc"
+            )
+
+            // Per-tax aggregate verification (Σ item tax lines == receipt-level tax amount)
+            result.taxResults.forEach { taxResult ->
+                val itemSum = result.items.sumOfDecimal { item ->
+                    item.taxLines.find { it.taxId == taxResult.tax.id }?.taxAmount ?: BigDecimal.ZERO
+                }
+                val match = itemSum.compareTo(taxResult.amount) == 0
+                VerifyRow(
+                    label    = "${taxResult.tax.name} Σ items",
+                    lhs      = itemSum,
+                    rhs      = taxResult.amount,
+                    match    = match,
+                    rhsLabel = "receipt total"
+                )
+            }
+        }
     }
 }
 
 @Composable
-fun ReceiptRow(label: String, value: BigDecimal, color: Color = POSColors.Text,
-               fontWeight: FontWeight = FontWeight.Normal, negative: Boolean = false, positive: Boolean = false) {
+fun VerifyRow(label: String, lhs: BigDecimal, rhs: BigDecimal, match: Boolean, rhsLabel: String) {
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(label, fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = POSColors.Muted,
+            modifier = Modifier.weight(1f))
+        Text(
+            "${lhs.fmt()} = ${rhs.fmt()} ($rhsLabel) ${if (match) "✅" else "⚠️"}",
+            fontSize = 11.sp, fontFamily = FontFamily.Monospace,
+            color    = if (match) POSColors.Teal else POSColors.Red
+        )
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Reusable UI Components
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+fun SubRow(label: String, value: BigDecimal, color: Color, negative: Boolean = false, positive: Boolean = false) {
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(label, fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = POSColors.Muted)
+        Text(
+            "${if (negative) "-" else if (positive) "+" else ""}${value.fmt()}",
+            fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = color
+        )
+    }
+}
+
+@Composable
+fun ReceiptRow(
+    label: String,
+    value: BigDecimal,
+    color: Color = POSColors.Text,
+    fontWeight: FontWeight = FontWeight.Normal,
+    negative: Boolean = false,
+    positive: Boolean = false
+) {
     Row(modifier = Modifier.fillMaxWidth().padding(vertical = 5.dp),
-        horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Text(label, fontSize = 12.sp, color = POSColors.Muted)
-        Text("${if (negative) "-" else if (positive) "+" else ""}${value.format()}",
-            fontSize = 12.sp, fontFamily = FontFamily.Monospace, fontWeight = fontWeight, color = color)
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment     = Alignment.CenterVertically) {
+        Text(label, fontSize = 12.sp, color = POSColors.Muted, modifier = Modifier.weight(1f))
+        Text(
+            "${if (negative) "-" else if (positive) "+" else ""}${value.fmt()}",
+            fontSize    = 12.sp,
+            fontFamily  = FontFamily.Monospace,
+            fontWeight  = fontWeight,
+            color       = color
+        )
     }
 }
 
@@ -734,20 +884,26 @@ fun SectionCard(
     onAdd: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    Surface(modifier = Modifier.fillMaxWidth(), color = POSColors.Card,
-        shape = RoundedCornerShape(10.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, POSColors.Border)) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color    = POSColors.Card,
+        shape    = RoundedCornerShape(10.dp),
+        border   = androidx.compose.foundation.BorderStroke(1.dp, POSColors.Border)
+    ) {
         Column {
-            Surface(modifier = Modifier.fillMaxWidth(),
-                color = accentColor.copy(alpha = 0.05f)) {
+            Surface(modifier = Modifier.fillMaxWidth(), color = accentColor.copy(alpha = 0.05f)) {
                 Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text(title, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp, color = accentColor)
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment     = Alignment.CenterVertically) {
+                    Text(title, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.6.sp, color = accentColor)
                     if (onAdd != null) {
-                        Button(onClick = onAdd,
-                            colors = ButtonDefaults.buttonColors(containerColor = accentColor),
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 5.dp),
-                            modifier = Modifier.height(28.dp)) {
+                        Button(
+                            onClick          = onAdd,
+                            colors           = ButtonDefaults.buttonColors(containerColor = accentColor),
+                            contentPadding   = PaddingValues(horizontal = 10.dp, vertical = 5.dp),
+                            modifier         = Modifier.height(28.dp)
+                        ) {
                             Icon(Icons.Default.Add, null, modifier = Modifier.size(14.dp))
                             Spacer(modifier = Modifier.width(4.dp))
                             Text("Add", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
@@ -762,23 +918,32 @@ fun SectionCard(
 
 @Composable
 fun POSTextField(
-    value: String, onValueChange: (String) -> Unit, modifier: Modifier = Modifier,
-    placeholder: String = "", keyboardType: KeyboardType = KeyboardType.Text,
-    prefix: String? = null, suffix: String? = null, textAlign: TextAlign = TextAlign.Start
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    placeholder: String = "",
+    keyboardType: KeyboardType = KeyboardType.Text,
+    prefix: String? = null,
+    suffix: String? = null,
+    textAlign: TextAlign = TextAlign.Start
 ) {
     OutlinedTextField(
-        value = value, onValueChange = onValueChange, modifier = modifier,
-        placeholder = { Text(placeholder, fontSize = 12.sp, color = POSColors.Muted) },
-        prefix = prefix?.let { { Text(it, fontSize = 12.sp, color = POSColors.Muted) } },
-        suffix = suffix?.let { { Text(it, fontSize = 12.sp, color = POSColors.Muted) } },
+        value         = value,
+        onValueChange = onValueChange,
+        modifier      = modifier,
+        placeholder   = { Text(placeholder, fontSize = 12.sp, color = POSColors.Muted) },
+        prefix        = prefix?.let { { Text(it, fontSize = 12.sp, color = POSColors.Muted) } },
+        suffix        = suffix?.let { { Text(it, fontSize = 12.sp, color = POSColors.Muted) } },
         keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
-        singleLine = true,
-        colors = OutlinedTextFieldDefaults.colors(
-            focusedBorderColor   = POSColors.Accent, unfocusedBorderColor = POSColors.Border2,
-            focusedTextColor     = POSColors.Text,   unfocusedTextColor   = POSColors.Text,
+        singleLine    = true,
+        colors        = OutlinedTextFieldDefaults.colors(
+            focusedBorderColor   = POSColors.Accent,
+            unfocusedBorderColor = POSColors.Border2,
+            focusedTextColor     = POSColors.Text,
+            unfocusedTextColor   = POSColors.Text,
             cursorColor          = POSColors.Accent
         ),
-        textStyle = LocalTextStyle.current.copy(
+        textStyle = TextStyle(
             fontSize   = 13.sp,
             fontFamily = if (keyboardType == KeyboardType.Decimal) FontFamily.Monospace else FontFamily.Default,
             textAlign  = textAlign
@@ -788,17 +953,32 @@ fun POSTextField(
 }
 
 @Composable
-fun <T> ToggleGroup(options: List<Pair<String, T>>, selected: T, onSelect: (T) -> Unit, modifier: Modifier = Modifier) {
-    Surface(modifier = modifier, color = POSColors.Surface, shape = RoundedCornerShape(7.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, POSColors.Border2)) {
+fun <T> ToggleGroup(
+    options: List<Pair<String, T>>,
+    selected: T,
+    onSelect: (T) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier,
+        color    = POSColors.Surface,
+        shape    = RoundedCornerShape(7.dp),
+        border   = androidx.compose.foundation.BorderStroke(1.dp, POSColors.Border2)
+    ) {
         Row {
             options.forEach { (label, value) ->
                 val isSelected = selected == value
-                Surface(onClick = { onSelect(value) }, color = if (isSelected) POSColors.Accent else Color.Transparent,
-                    modifier = Modifier.weight(1f)) {
-                    Text(label, modifier = Modifier.padding(vertical = 6.dp, horizontal = 10.dp),
-                        fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
-                        color = if (isSelected) Color.White else POSColors.Muted, textAlign = TextAlign.Center)
+                Surface(
+                    onClick  = { onSelect(value) },
+                    color    = if (isSelected) POSColors.Accent else Color.Transparent,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(label,
+                        modifier  = Modifier.padding(vertical = 6.dp, horizontal = 10.dp),
+                        fontSize  = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color     = if (isSelected) Color.White else POSColors.Muted,
+                        textAlign = TextAlign.Center)
                 }
             }
         }
@@ -808,14 +988,15 @@ fun <T> ToggleGroup(options: List<Pair<String, T>>, selected: T, onSelect: (T) -
 @Composable
 fun FlowIndicator() {
     Row(horizontalArrangement = Arrangement.spacedBy(4.dp),
-        verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+        verticalAlignment     = Alignment.CenterVertically,
+        modifier              = Modifier.fillMaxWidth()) {
         val steps = listOf(
-            "Gross"         to POSColors.Accent2,
-            "Line Discs"    to POSColors.Orange,
-            "Receipt Discs" to POSColors.Purple,
-            "Item Taxes"    to POSColors.Green,
-            "Fixed Charges" to POSColors.Teal,
-            "Grand Total"   to POSColors.Accent2
+            "Gross"          to POSColors.Accent2,
+            "Line Discs"     to POSColors.Orange,
+            "Receipt Discs"  to POSColors.Purple,
+            "Item Taxes"     to POSColors.Green,
+            "Fixed Charges"  to POSColors.Teal,
+            "Grand Total"    to POSColors.Accent2
         )
         steps.forEachIndexed { index, (label, color) ->
             Surface(color = color.copy(alpha = 0.15f), shape = RoundedCornerShape(20.dp)) {
@@ -827,9 +1008,19 @@ fun FlowIndicator() {
     }
 }
 
-val ColumnHeaderStyle = androidx.compose.ui.text.TextStyle(
-    fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp, color = POSColors.Muted
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+val ColumnHeaderStyle = TextStyle(
+    fontSize     = 10.sp,
+    fontWeight   = FontWeight.Bold,
+    letterSpacing = 0.5.sp,
+    color        = POSColors.Muted
 )
 
-fun BigDecimal.format(): String =
+/** Format BigDecimal as a dollar amount. */
+fun BigDecimal.fmt(): String =
     "$${this.setScale(2, java.math.RoundingMode.HALF_UP).toPlainString()}"
+
+/** Convenience sum for receipt verification. */
