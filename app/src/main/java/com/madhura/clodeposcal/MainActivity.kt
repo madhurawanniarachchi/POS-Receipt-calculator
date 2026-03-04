@@ -313,7 +313,7 @@ fun InputPanel(
                         )
                     }
                     if (receiptDiscounts.size > 1)
-                        Text("⚡ Multiple discounts each calculated from the original subtotal — not compounded",
+                        Text("⚡ Each discount calculated from Subtotal (1) — after line discounts, not compounded",
                             fontSize = 10.sp, color = POSColors.Amber)
                 }
             }
@@ -627,7 +627,7 @@ fun ReceiptPanel(result: CalculationResult) {
             if (result.totalLineDiscount > BigDecimal.ZERO)
                 ReceiptRow("Line Discounts", result.totalLineDiscount, POSColors.Red, negative = true)
 
-            ReceiptRow("Subtotal (1) — after line discounts", result.subtotal1)
+            ReceiptRow("Subtotal (1) — after line discounts (receipt discount base)", result.subtotal1)
 
             result.receiptDiscountAmounts.forEach { (disc, amount) ->
                 if (amount > BigDecimal.ZERO) {

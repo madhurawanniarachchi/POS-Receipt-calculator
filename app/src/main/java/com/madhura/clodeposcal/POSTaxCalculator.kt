@@ -250,12 +250,12 @@ class POSTaxCalculator(
         val subtotal1         = s1list.fold(ZERO) { a, s -> a + s.netAfterLine }
 
         // ══════════════════════════════════════════════════════════════════════
-        // STEP 2 — Receipt discounts (all computed from the ORIGINAL subtotal1 base)
+        // STEP 2 — Receipt discounts applied AFTER line discounts
         //          + round-robin distribution to items
         //
-        // Every receipt discount — percent or fixed — is calculated against subtotal1,
-        // not a running remainder. Multiple discounts are independent and each references
-        // the same original base. The total deduction is their sum, clamped to subtotal1.
+        // Base for all receipt discounts = subtotal1 = Σ netAfterLine (after line discounts).
+        // Multiple receipt discounts are each independently calculated from this same base
+        // (not compounded/sequential). Total deduction is their sum, clamped to subtotal1.
         // ══════════════════════════════════════════════════════════════════════
 
         val receiptDiscountAmounts = receiptDiscounts.map { disc ->
