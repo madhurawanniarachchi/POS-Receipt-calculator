@@ -81,9 +81,8 @@ fun POSTaxCalculatorScreen() {
     var lineDiscounts by remember {
         mutableStateOf(
             listOf(
-                Discount(UUID.randomUUID().toString(), "Member 10%",  DiscountType.PERCENT, BigDecimal("10")),
-                Discount(UUID.randomUUID().toString(), "Coupon \$5",  DiscountType.FIXED,   BigDecimal("5")),
-                Discount(UUID.randomUUID().toString(), "Staff 15%",   DiscountType.PERCENT, BigDecimal("15"))
+                Discount(UUID.randomUUID().toString(), "Nexus 25%",  DiscountType.PERCENT, BigDecimal("25")),
+                Discount(UUID.randomUUID().toString(), "Quick deal 30%",  DiscountType.PERCENT,   BigDecimal("30")),
             )
         )
     }
@@ -104,13 +103,13 @@ fun POSTaxCalculatorScreen() {
     var items by remember {
         mutableStateOf(
             listOf(
-                Item("1", "Product A", BigDecimal("1"), BigDecimal("390.00"),
+                Item("1", "Ambewela Non-Fat Milk Uht Tetra 1L", BigDecimal("1"), BigDecimal("390.00"),
                     appliedDiscountIds = emptySet(),
                     appliedTaxIds      = setOf("inc1", "inc2", "service", "gst")),
-                Item("2", "Product B", BigDecimal("1"), BigDecimal("315.00"),
+                Item("2", "Elephant House Cream Soda Pet Bottle 1.5L", BigDecimal("1"), BigDecimal("315.00"),
                     appliedDiscountIds = emptySet(),
                     appliedTaxIds      = setOf("inc1", "inc2", "service", "gst")),
-                Item("3", "Product C", BigDecimal("1"), BigDecimal("70.00"),
+                Item("3", "Keells Drinking Water Pet 500ml", BigDecimal("1"), BigDecimal("70.00"),
                     appliedDiscountIds = emptySet(),
                     appliedTaxIds      = setOf("inc1", "inc2", "service", "gst"))
             )
@@ -120,7 +119,11 @@ fun POSTaxCalculatorScreen() {
     // ── Receipt discounts ─────────────────────────────────────────────────────
     var receiptDiscounts by remember {
         mutableStateOf(
-            listOf(Discount(UUID.randomUUID().toString(), "Loyalty", DiscountType.PERCENT, BigDecimal.ZERO))
+            listOf(
+                Discount(UUID.randomUUID().toString(), "R - Nexus", DiscountType.PERCENT, 25.toBigDecimal()),
+                Discount(UUID.randomUUID().toString(), "R - Quick deal", DiscountType.PERCENT, 30.toBigDecimal()),
+                Discount(UUID.randomUUID().toString(), "E - Re-usable Bag", DiscountType.FIXED, 50.toBigDecimal())
+            )
         )
     }
 
