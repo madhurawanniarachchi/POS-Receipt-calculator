@@ -237,7 +237,7 @@ fun InputPanel(
                     Text("Tax Calculator", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = POSColors.Text)
                     Surface(color = POSColors.Surface, shape = RoundedCornerShape(20.dp),
                         border = androidx.compose.foundation.BorderStroke(1.dp, POSColors.Border)) {
-                        Text("🔢 Largest-Remainder Distribution",
+                        Text("🔢 Sequential Discounts + Aggregate Tax",
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                             fontSize = 10.sp, color = POSColors.Muted)
                     }
@@ -316,7 +316,7 @@ fun InputPanel(
                         )
                     }
                     if (receiptDiscounts.size > 1)
-                        Text("⚡ Each discount calculated from Subtotal (1) — after line discounts, not compounded",
+                        Text("⚡ Applied sequentially — each taken from the running total after the previous discount",
                             fontSize = 10.sp, color = POSColors.Amber)
                 }
             }
@@ -630,7 +630,7 @@ fun ReceiptPanel(result: CalculationResult) {
             if (result.totalLineDiscount > BigDecimal.ZERO)
                 ReceiptRow("Line Discounts", result.totalLineDiscount, POSColors.Red, negative = true)
 
-            ReceiptRow("Subtotal (1) — after line discounts (receipt discount base)", result.subtotal1)
+            ReceiptRow("Subtotal (1) — after line discounts", result.subtotal1)
 
             result.receiptDiscountAmounts.forEach { (disc, amount) ->
                 if (amount > BigDecimal.ZERO) {
@@ -1035,4 +1035,3 @@ val ColumnHeaderStyle = TextStyle(
 fun BigDecimal.fmt(): String =
     "$${this.setScale(2, java.math.RoundingMode.HALF_UP).toPlainString()}"
 
-/** Convenience sum for receipt verification. */
