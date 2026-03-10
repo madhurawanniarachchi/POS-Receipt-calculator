@@ -111,8 +111,8 @@ data class ProcessedItem(
     val totalLineDiscount: BigDecimal,
     /** gross − totalLineDiscount */
     val netAfterLine: BigDecimal,
-    /** Round-robin share of receipt discount(s). */
-    val receiptDiscountShare: BigDecimal,
+    /** Round-robin share of each receipt discount, in application order. */
+    val receiptDiscountBreakdown: List<Pair<Discount, BigDecimal>>,
     /** netAfterLine − receiptDiscountShare  (price still containing inclusive taxes) */
     val afterReceiptDiscount: BigDecimal,
     /**
@@ -130,7 +130,11 @@ data class ProcessedItem(
     val totalTax: BigDecimal,
     /** inclusiveTaxBase + Σ EXCLUDE taxLine amounts */
     val totalInclTax: BigDecimal
-)
+) {
+    /** Σ receiptDiscountBreakdown amounts — total receipt discount allocated to this item. */
+    val receiptDiscountShare: BigDecimal
+        get() = receiptDiscountBreakdown.fold(BigDecimal.ZERO) { a, p -> a + p.second }
+}
 
 data class TaxResult(
     val tax: Tax,
@@ -299,10 +303,26 @@ class ReceiptCalculator(
             .fold(ZERO) { a, p -> a + p.second }
         val subtotal2 = (subtotal1 - totalReceiptDiscountAmount).r2()
 
-        val perItemReceiptDisc: List<BigDecimal> = roundRobin(
-            total   = totalReceiptDiscountAmount,
-            weights = s1list.map { it.netAfterLine }
-        )
+        // Distribute each receipt discount independently via round-robin,
+        // using the running net-after-previous-discounts as weights so the
+        // sequential nature is preserved at item level too.
+        // perItemReceiptDiscBreakdown[discIndex] = List<BigDecimal> (one per item)
+        data class RRPass(val disc: Discount, val allocs: List<BigDecimal>)
+
+        val rrPasses = mutableListOf<RRPass>()
+        val runningWeights = s1list.map { it.netAfterLine }.toMutableList()
+
+        receiptDiscountAmounts.forEach { (disc, discTotal) ->
+            val allocs = roundRobin(total = discTotal, weights = runningWeights)
+            rrPasses.add(RRPass(disc, allocs))
+            // Subtract this discount's allocs from running weights for next pass
+            allocs.forEachIndexed { i, a -> runningWeights[i] = (runningWeights[i] - a).max(BigDecimal.ZERO) }
+        }
+
+        // perItemReceiptDisc[i] = total receipt discount allocated to item i (for afterReceiptDiscount)
+        val perItemReceiptDisc: List<BigDecimal> = s1list.indices.map { i ->
+            rrPasses.fold(BigDecimal.ZERO) { acc, pass -> acc + pass.allocs[i] }
+        }
 
         val afterReceiptDiscounts: List<BigDecimal> = s1list.mapIndexed { i, s1 ->
             (s1.netAfterLine - perItemReceiptDisc[i]).clampR2()
@@ -467,7 +487,9 @@ class ReceiptCalculator(
                 lineDiscountBreakdown = s1.discBreakdown,
                 totalLineDiscount     = s1.totalDisc,
                 netAfterLine          = s1.netAfterLine,
-                receiptDiscountShare  = perItemReceiptDisc[i],
+                receiptDiscountBreakdown = rrPasses.map { pass ->
+                    pass.disc to pass.allocs[i]
+                },
                 afterReceiptDiscount  = afterReceiptDiscounts[i],
                 inclusiveTaxBase      = inclBasePerItem[i],
                 taxLines              = taxLines,

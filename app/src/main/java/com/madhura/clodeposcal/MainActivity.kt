@@ -948,11 +948,25 @@ fun ReceiptItem(item: ProcessedItem) {
             if (item.totalLineDiscount > BigDecimal.ZERO)
                 SubRow("After line disc", item.netAfterLine, POSColors.Orange)
 
-            // Receipt discount share
+            // Receipt discount breakdown (one row per discount)
+            item.receiptDiscountBreakdown.forEach { (disc, amount) ->
+                if (amount > BigDecimal.ZERO) {
+                    val suffix = if (disc.type == DiscountType.PERCENT)
+                        " ${disc.value.stripTrailingZeros().toPlainString()}% (LR alloc)"
+                    else
+                        " fixed (LR alloc)"
+                    SubRow(
+                        label    = "${disc.label.ifBlank { "Receipt disc" }}$suffix",
+                        value    = amount,
+                        color    = POSColors.Purple,
+                        negative = true
+                    )
+                }
+            }
             if (item.receiptDiscountShare > BigDecimal.ZERO)
-                SubRow("Receipt disc (LR alloc)", item.receiptDiscountShare, POSColors.Purple, negative = true)
+                SubRow("After receipt discs", item.afterReceiptDiscount, POSColors.Purple)
 
-            SubRow("After receipt disc (incl-tax price)", item.afterReceiptDiscount, POSColors.Muted)
+            // afterReceiptDiscount is shown inline above after the breakdown
 
             if (item.afterReceiptDiscount != item.inclusiveTaxBase)
                 SubRow("Net of incl taxes (excl-tax base)", item.inclusiveTaxBase, POSColors.Accent2)
