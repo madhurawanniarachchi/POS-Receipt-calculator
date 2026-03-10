@@ -400,9 +400,9 @@ fun ItemCard(
     onUpdate: (Item) -> Unit,
     onDelete: () -> Unit
 ) {
-    // Gross = (unitPrice × qty) + Σ(modifier.price × modifier.qty)
+    // Gross = (unitPrice × qty) + Σ(item.qty × modifier.qty × modifier.price)
     val modifierTotal = item.modifiers.fold(BigDecimal.ZERO) { acc, mod ->
-        acc + (mod.price * mod.qty).setScale(2, java.math.RoundingMode.HALF_UP)
+        acc + (item.qty * mod.qty * mod.price).setScale(2, java.math.RoundingMode.HALF_UP)
     }
     val gross = (item.qty * item.unitPrice)
         .setScale(2, java.math.RoundingMode.HALF_UP) + modifierTotal
@@ -452,6 +452,7 @@ fun ItemCard(
             // ── Modifiers ─────────────────────────────────────────────────────
             ModifierPanel(
                 modifiers = item.modifiers,
+                itemQty   = item.qty,
                 onAddModifier = {
                     onUpdate(item.copy(modifiers = item.modifiers + Modifier(UUID.randomUUID().toString(), "", BigDecimal.ONE, BigDecimal.ZERO)))
                 },
@@ -529,6 +530,7 @@ fun ItemCard(
 @Composable
 fun ModifierPanel(
     modifiers: List<com.madhura.clodeposcal.Modifier>,
+    itemQty: BigDecimal,
     onAddModifier: () -> Unit,
     onUpdateModifier: (String, com.madhura.clodeposcal.Modifier) -> Unit,
     onDeleteModifier: (String) -> Unit
@@ -554,7 +556,7 @@ fun ModifierPanel(
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (modifiers.isNotEmpty()) {
                     val modTotal = modifiers.fold(BigDecimal.ZERO) { acc, m ->
-                        acc + (m.price * m.qty).setScale(2, java.math.RoundingMode.HALF_UP)
+                        acc + (itemQty * m.qty * m.price).setScale(2, java.math.RoundingMode.HALF_UP)
                     }
                     Surface(color = POSColors.Pink.copy(alpha = 0.15f), shape = RoundedCornerShape(4.dp)) {
                         Text(
@@ -593,7 +595,8 @@ fun ModifierPanel(
             }
             modifiers.forEach { mod ->
                 ModifierRow(
-                    modifier1 = mod,
+                    mod = mod,
+                    itemQty  = itemQty,
                     onUpdate = { onUpdateModifier(mod.id, it) },
                     onDelete = { onDeleteModifier(mod.id) }
                 )
@@ -608,11 +611,13 @@ fun ModifierPanel(
 
 @Composable
 fun ModifierRow(
-    modifier1: com.madhura.clodeposcal.Modifier,
+    mod: com.madhura.clodeposcal.Modifier,
+    itemQty: BigDecimal,
     onUpdate: (com.madhura.clodeposcal.Modifier) -> Unit,
     onDelete: () -> Unit
 ) {
-    val lineTotal = (modifier1.price * modifier1.qty)
+    // lineTotal = itemQty × mod.qty × mod.price
+    val lineTotal = (itemQty * mod.qty * mod.price)
         .setScale(2, java.math.RoundingMode.HALF_UP)
 
     Row(
@@ -620,21 +625,21 @@ fun ModifierRow(
         verticalAlignment     = Alignment.CenterVertically
     ) {
         POSTextField(
-            value         = modifier1.name,
-            onValueChange = { onUpdate(modifier1.copy(name = it)) },
+            value         = mod.name,
+            onValueChange = { onUpdate(mod.copy(name = it)) },
             modifier      = Modifier.weight(1f),
             placeholder   = "Modifier name"
         )
         POSTextField(
-            value         = modifier1.qty.toPlainString(),
-            onValueChange = { runCatching { onUpdate(modifier1.copy(qty = BigDecimal(it))) } },
+            value         = mod.qty.toPlainString(),
+            onValueChange = { runCatching { onUpdate(mod.copy(qty = BigDecimal(it))) } },
             modifier      = Modifier.width(60.dp),
             keyboardType  = KeyboardType.Decimal,
             textAlign     = TextAlign.End
         )
         POSTextField(
-            value         = modifier1.price.toPlainString(),
-            onValueChange = { runCatching { onUpdate(modifier1.copy(price = BigDecimal(it))) } },
+            value         = mod.price.toPlainString(),
+            onValueChange = { runCatching { onUpdate(mod.copy(price = BigDecimal(it))) } },
             modifier      = Modifier.width(90.dp),
             keyboardType  = KeyboardType.Decimal,
             textAlign     = TextAlign.End
@@ -922,9 +927,10 @@ fun ReceiptItem(item: ProcessedItem) {
             // Modifiers
             if (item.item.modifiers.isNotEmpty()) {
                 item.item.modifiers.forEach { mod ->
-                    val lineTotal = (mod.price * mod.qty).setScale(2, java.math.RoundingMode.HALF_UP)
+                    val lineTotal = (item.item.qty * mod.qty * mod.price)
+                        .setScale(2, java.math.RoundingMode.HALF_UP)
                     SubRow(
-                        label    = "+ ${mod.name.ifBlank { "Modifier" }} (${mod.qty.stripTrailingZeros()} × ${mod.price.fmt()})",
+                        label    = "+ ${mod.name.ifBlank { "Modifier" }} (${item.item.qty.stripTrailingZeros()} × ${mod.qty.stripTrailingZeros()} × ${mod.price.fmt()})",
                         value    = lineTotal,
                         color    = POSColors.Pink,
                         positive = true
