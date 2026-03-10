@@ -54,13 +54,31 @@ data class Tax(
     val taxOrder: TaxOrder = TaxOrder.BEFORE
 )
 
+/**
+ * A modifier is an add-on or variation attached to an Item.
+ * Its total value (qty × price) is added to the item's base price
+ * before any discounts or taxes are applied.
+ */
+data class Modifier(
+    val id: String,
+    val name: String,
+    val qty: BigDecimal,
+    val price: BigDecimal
+)
+
+/**
+ * [modifiers]        — add-ons/variations; their totals are summed into the base price.
+ * [appliedDiscounts] — ordered list of line discounts to apply sequentially.
+ * [appliedTaxes]     — ordered list of taxes to apply (order matches catalogue order).
+ */
 data class Item(
     val id: String,
     val name: String,
     val qty: BigDecimal,
     val unitPrice: BigDecimal,
-    val appliedDiscountIds: Set<String> = emptySet(),
-    val appliedTaxIds: Set<String> = emptySet()
+    val modifiers: List<Modifier> = emptyList(),
+    val appliedDiscounts: List<Discount> = emptyList(),
+    val appliedTaxes: List<Tax> = emptyList()
 )
 
 data class FixedCharge(
@@ -87,6 +105,7 @@ data class TaxLine(
 
 data class ProcessedItem(
     val item: Item,
+    val modifierTotal: BigDecimal,
     val gross: BigDecimal,
     val lineDiscountBreakdown: List<Pair<Discount, BigDecimal>>,
     val totalLineDiscount: BigDecimal,
@@ -143,8 +162,8 @@ data class CalculationResult(
 
 class ReceiptCalculator(
     private val items: List<Item>,
-    private val lineDiscounts: List<Discount>,
-    private val taxes: List<Tax>,
+    private val lineDiscounts: List<Discount>,   // catalogue — kept for receipt-discount reference
+    private val taxes: List<Tax>,                // catalogue — defines processing order
     private val receiptDiscounts: List<Discount> = emptyList(),
     private val fixedCharges: List<FixedCharge> = emptyList()
 ) {
@@ -208,7 +227,6 @@ class ReceiptCalculator(
         val result = floored.toMutableList()
         repeat(remainderCents) { k ->
             val idx = priority[k % n].first
-
             val step = BigDecimal.ONE.scaleByPowerOfTen(-decimalPlace)
             result[idx] = (result[idx] + step).r2()
         }
@@ -219,25 +237,36 @@ class ReceiptCalculator(
     fun calculate(): CalculationResult {
 
         // ══════════════════════════════════════════════════════════════════════
-        // STEP 1 — Base price & item-level discounts
+        // STEP 1 — Base price (item + modifiers) & item-level discounts
         //
-        // Each discount is computed from the ORIGINAL base (spec requirement).
+        // gross = (unitPrice × qty) + Σ(item.qty × modifier.qty × modifier.price)
+        //
+        // Discounts are drawn from item.appliedDiscounts (the embedded list,
+        // not the global catalogue) so each item is fully self-contained.
+        // Each discount is applied SEQUENTIALLY to the running value.
         // ══════════════════════════════════════════════════════════════════════
 
         data class S1(
             val item: Item,
+            val modifierTotal: BigDecimal,
             val gross: BigDecimal,
             val discBreakdown: List<Pair<Discount, BigDecimal>>,
             val totalDisc: BigDecimal,
-            val netAfterLine: BigDecimal        // exact 2dp; used as weight later
+            val netAfterLine: BigDecimal
         )
 
         val s1list = items.map { item ->
-            val base    = (item.unitPrice * item.qty).r2()
+            // Modifier total: Σ (item.qty × modifier.qty × modifier.price)
+            val modTotal = item.modifiers.fold(ZERO) { acc, mod ->
+                acc + (item.qty * mod.qty * mod.price).r2()
+            }.r2()
+
+            // Gross = item lines + modifier contributions
+            val base = (item.unitPrice * item.qty).r2() + modTotal
+
             var running = base
-            val appliedDiscs = lineDiscounts.filter { it.id in item.appliedDiscountIds }
-            val breakdown = appliedDiscs.map { disc ->
-                // Sequential: each discount applies to the RUNNING value after previous discounts
+            val breakdown = item.appliedDiscounts.map { disc ->
+                // Sequential: each discount applies to the running value after previous discounts
                 val raw = when (disc.type) {
                     DiscountType.PERCENT -> (running * disc.value / HUNDRED).r2()
                     DiscountType.FIXED   -> disc.value.r2()
@@ -246,8 +275,8 @@ class ReceiptCalculator(
                 running = (running - amt).clampR2()
                 disc to amt
             }
-            val totalDisc = breakdown.fold(ZERO, { a, p -> a + p.second })
-            S1(item, base, breakdown, totalDisc, running)
+            val totalDisc = breakdown.fold(ZERO) { a, p -> a + p.second }
+            S1(item, modTotal, base, breakdown, totalDisc, running)
         }
 
         val grossTotal        = s1list.fold(ZERO) { a, s -> a + s.gross }
@@ -257,9 +286,6 @@ class ReceiptCalculator(
         // ══════════════════════════════════════════════════════════════════════
         // STEP 2 — Receipt discounts applied sequentially after line discounts
         //          + round-robin distribution to items
-        //
-        // Each receipt discount applies to the RUNNING subtotal left after the
-        // previous receipt discount. Same sequential rule as line discounts.
         // ══════════════════════════════════════════════════════════════════════
 
         var runningSub = subtotal1
@@ -275,115 +301,101 @@ class ReceiptCalculator(
             .fold(ZERO) { a, p -> a + p.second }
         val subtotal2 = (subtotal1 - totalReceiptDiscountAmount).r2()
 
-        // Distribute the total receipt discount to items (proportional to netAfterLine)
         val perItemReceiptDisc: List<BigDecimal> = roundRobin(
             total   = totalReceiptDiscountAmount,
             weights = s1list.map { it.netAfterLine }
         )
 
-        // afterReceiptDiscount per item (exact 2dp — these are the "price" for tax purposes)
         val afterReceiptDiscounts: List<BigDecimal> = s1list.mapIndexed { i, s1 ->
             (s1.netAfterLine - perItemReceiptDisc[i]).clampR2()
         }
 
         // ══════════════════════════════════════════════════════════════════════
-        // STEP 3 — Aggregate inclusive-tax base, then round-robin to items
+        // STEP 3 — Inclusive-tax base (aggregate → round-robin)
         //
-        // For each item, the EXACT (unrounded) inclusive-tax base is:
-        //   exactInclBase_i = afterReceiptDiscount_i × 100 / (100 + sumInclRates_i)
-        //
-        // We sum ALL exact bases → compute receipt-level totals → RR back to items.
-        // This keeps rounding to a single operation per tax.
+        // sumInclRates is now derived from item.appliedTaxes (the embedded list).
         // ══════════════════════════════════════════════════════════════════════
 
-        // Per-item sum of INCLUDE rates (items may have different tax sets)
         val sumInclRatesPerItem: List<BigDecimal> = s1list.map { s1 ->
-            taxes.filter { it.id in s1.item.appliedTaxIds && it.mode == TaxMode.INCLUDE && it.rate > ZERO }
+            s1.item.appliedTaxes
+                .filter { it.mode == TaxMode.INCLUDE && it.rate > ZERO }
                 .fold(ZERO) { a, t -> a + t.rate }
         }
 
-        // Exact (high-precision) inclusive-tax base per item — NOT rounded yet
         val exactInclBasePerItem: List<BigDecimal> = s1list.mapIndexed { i, _ ->
-            val ard  = afterReceiptDiscounts[i]
-            val sIR  = sumInclRatesPerItem[i]
+            val ard = afterReceiptDiscounts[i]
+            val sIR = sumInclRatesPerItem[i]
             if (sIR > ZERO)
                 ard.multiply(HUNDRED, MC).divide(HUNDRED.add(sIR, MC), MC)
             else
-                ard.setScale(10, RoundingMode.HALF_UP)  // keep high precision for weight
+                ard.setScale(10, RoundingMode.HALF_UP)
         }
 
-        // Aggregate net base at receipt level → single r2
         val aggNetBase: BigDecimal = exactInclBasePerItem.fold(ZERO) { a, b -> a.add(b, MC) }.r2()
-        // subtotal2 should equal aggNetBase (both are the net-of-inclusive-tax total)
-        // They may differ by ¢1 due to the clampR2 on individual ARDs; use aggNetBase as truth.
 
-        // Round-robin distribute aggNetBase to items (using exact bases as weights)
         val inclBasePerItem: List<BigDecimal> = roundRobin(
             total   = aggNetBase,
             weights = exactInclBasePerItem
         )
 
         // ══════════════════════════════════════════════════════════════════════
-        // STEP 4 — Per-tax: aggregate base → one receipt-level total → RR to items
+        // STEP 4 — Per-tax aggregation → single receipt total → RR to items
         //
-        // For EXCLUDE taxes:
-        //   BEFORE: base_i = inclBasePerItem[i]   (exact already RR-distributed)
-        //   AFTER : base_i = inclBasePerItem[i] + Σ previous EXCL taxes allocated to item i
+        // Tax eligibility is now determined by item.appliedTaxes (the embedded
+        // list). The global [taxes] catalogue defines processing ORDER only
+        // (BEFORE first, then AFTER).
         //
-        // For INCLUDE taxes:
-        //   base_i = afterReceiptDiscount[i]  (the stated price including embedded tax)
-        //   formula: ard_i × rate / (100 + sumInclRates_i)
-        //
-        // Aggregate: sum exact per-item tax amounts first, r2() once, RR back.
+        // For any tax id that appears in an item's appliedTaxes but NOT in the
+        // global catalogue, it is processed in BEFORE order with its own
+        // embedded mode/taxOrder values.
         // ══════════════════════════════════════════════════════════════════════
 
-        // Processing order: BEFORE taxes (catalogue order) then AFTER taxes (catalogue order)
-        val orderedTaxes = taxes.filter { it.taxOrder == TaxOrder.BEFORE } +
-                taxes.filter { it.taxOrder == TaxOrder.AFTER }
+        // Build ordered tax list: first from catalogue (BEFORE then AFTER),
+        // then any "orphan" taxes embedded in items that aren't in the catalogue.
+        val catalogueTaxIds = taxes.map { it.id }.toSet()
+        val orphanTaxes: List<Tax> = items
+            .flatMap { it.appliedTaxes }
+            .filter { it.id !in catalogueTaxIds }
+            .distinctBy { it.id }
 
-        // taxId → List<BigDecimal> (one allocated amount per item, parallel to s1list)
+        val orderedTaxes: List<Tax> =
+            taxes.filter { it.taxOrder == TaxOrder.BEFORE } +
+                    taxes.filter { it.taxOrder == TaxOrder.AFTER } +
+                    orphanTaxes.filter { it.taxOrder == TaxOrder.BEFORE } +
+                    orphanTaxes.filter { it.taxOrder == TaxOrder.AFTER }
+
         val taxAllocPerItem: MutableMap<String, List<BigDecimal>> = mutableMapOf()
-        // taxId → TaxResult (receipt-level aggregate)
         val taxResultMap:    MutableMap<String, TaxResult>        = mutableMapOf()
-
-        // Running per-item EXCLUDE tax totals (accumulated as AFTER taxes are processed)
-        // Kept at 2dp (already RR-distributed) so AFTER base is exact cents.
-        val runningExclPerItem: MutableList<BigDecimal> = MutableList(s1list.size) { ZERO }
+        val runningExclPerItem: MutableList<BigDecimal>            = MutableList(s1list.size) { ZERO }
 
         orderedTaxes.forEach { tax ->
             if (tax.rate <= ZERO) return@forEach
 
-            // Indices of items that opted in to this tax
-            val eligible = s1list.indices.filter { tax.id in s1list[it].item.appliedTaxIds }
+            // An item opts in if its embedded appliedTaxes list contains this tax id
+            val eligible = s1list.indices.filter { i ->
+                s1list[i].item.appliedTaxes.any { it.id == tax.id }
+            }
             if (eligible.isEmpty()) return@forEach
 
-            // Exact per-item base (unrounded) for each eligible item
             val exactBasesEligible: List<BigDecimal> = eligible.map { i ->
                 when (tax.mode) {
                     TaxMode.INCLUDE ->
-                        // Use afterReceiptDiscount (the stated inclusive price)
                         afterReceiptDiscounts[i].setScale(10, RoundingMode.HALF_UP)
-
                     TaxMode.EXCLUDE -> when (tax.taxOrder) {
                         TaxOrder.BEFORE ->
-                            // Net base already RR-distributed; use as high-precision weight
                             exactInclBasePerItem[i]
                         TaxOrder.AFTER  ->
-                            // inclBasePerItem[i] is already cents; add running excl taxes
                             (inclBasePerItem[i] + runningExclPerItem[i])
                                 .setScale(10, RoundingMode.HALF_UP)
                     }
                 }
             }
 
-            // Aggregate base at full precision → compute ONE tax amount → r2
-            val aggBase   = exactBasesEligible.fold(ZERO) { a, b -> a.add(b, MC) }
+            val aggBase = exactBasesEligible.fold(ZERO) { a, b -> a.add(b, MC) }
             val aggAmount: BigDecimal = when (tax.mode) {
                 TaxMode.EXCLUDE -> (aggBase * tax.rate / HUNDRED).r2()
                 TaxMode.INCLUDE -> {
-                    // sumInclRates may differ per item; use weighted average denominator
-                    // Correct approach: sum each item's exact include-tax contribution
-                    val exactAmountsSum = eligible.mapIndexed { pos, i ->
+                    val exactAmountsSum = eligible.mapIndexed { _, i ->
                         val sIR   = sumInclRatesPerItem[i]
                         val denom = HUNDRED.add(sIR, MC)
                         afterReceiptDiscounts[i].multiply(tax.rate, MC).divide(denom, MC)
@@ -392,19 +404,16 @@ class ReceiptCalculator(
                 }
             }
 
-            // Round-robin distribute aggAmount back to eligible items
             val allocsEligible: List<BigDecimal> = roundRobin(
                 total   = aggAmount,
                 weights = exactBasesEligible
             )
 
-            // Store in full-item-list arrays (non-eligible items get ZERO)
             val fullAllocs = MutableList(s1list.size) { ZERO }
             eligible.forEachIndexed { pos, i -> fullAllocs[i] = allocsEligible[pos] }
             taxAllocPerItem[tax.id] = fullAllocs
 
-            // Display base for TaxResult = sum of r2'd per-item bases (for receipt display)
-            val displayBase = eligible.mapIndexed { pos, i ->
+            val displayBase = eligible.mapIndexed { _, i ->
                 when (tax.mode) {
                     TaxMode.INCLUDE -> afterReceiptDiscounts[i]
                     TaxMode.EXCLUDE -> when (tax.taxOrder) {
@@ -416,7 +425,6 @@ class ReceiptCalculator(
 
             taxResultMap[tax.id] = TaxResult(tax = tax, base = displayBase, amount = aggAmount)
 
-            // Accumulate EXCLUDE allocations into runningExclPerItem for subsequent AFTER taxes
             if (tax.mode == TaxMode.EXCLUDE) {
                 eligible.forEachIndexed { pos, i ->
                     runningExclPerItem[i] = (runningExclPerItem[i] + allocsEligible[pos]).r2()
@@ -424,8 +432,7 @@ class ReceiptCalculator(
             }
         }
 
-        // Receipt-level tax aggregates
-        val taxResults       = orderedTaxes.mapNotNull { taxResultMap[it.id] }
+        val taxResults        = orderedTaxes.mapNotNull { taxResultMap[it.id] }
         val inclusiveTaxTotal = taxResults.filter { it.tax.mode == TaxMode.INCLUDE }
             .fold(ZERO) { a, t -> a + t.amount }
         val exclusiveTaxTotal = taxResults.filter { it.tax.mode == TaxMode.EXCLUDE }
@@ -436,18 +443,14 @@ class ReceiptCalculator(
         // ══════════════════════════════════════════════════════════════════════
 
         val processedItems = s1list.mapIndexed { i, s1 ->
-            // Build TaxLines for this item (only taxes it opted in to)
             val taxLines = orderedTaxes.mapNotNull { tax ->
-                if (tax.id !in s1.item.appliedTaxIds) return@mapNotNull null
+                if (s1.item.appliedTaxes.none { it.id == tax.id }) return@mapNotNull null
                 val alloc = taxAllocPerItem[tax.id]?.get(i) ?: return@mapNotNull null
-                // Display base: what was actually used for this item
                 val displayBase = when (tax.mode) {
                     TaxMode.INCLUDE -> afterReceiptDiscounts[i]
                     TaxMode.EXCLUDE -> when (tax.taxOrder) {
                         TaxOrder.BEFORE -> inclBasePerItem[i]
                         TaxOrder.AFTER  -> {
-                            // running excl before this tax = runningExclPerItem[i] minus this alloc
-                            // (runningExclPerItem was already advanced; back-compute for display)
                             val prevExcl = (runningExclPerItem[i] - alloc).clampR2()
                             (inclBasePerItem[i] + prevExcl).r2()
                         }
@@ -470,6 +473,7 @@ class ReceiptCalculator(
 
             ProcessedItem(
                 item                  = s1.item,
+                modifierTotal         = s1.modifierTotal,
                 gross                 = s1.gross,
                 lineDiscountBreakdown = s1.discBreakdown,
                 totalLineDiscount     = s1.totalDisc,
@@ -480,8 +484,6 @@ class ReceiptCalculator(
                 taxLines              = taxLines,
                 totalExclTax          = inclBasePerItem[i],
                 totalTax              = totalAllTaxAmt,
-                // afterReceiptDiscount already contains embedded inclusive taxes;
-                // add only the exclusive taxes that are charged on top.
                 totalInclTax          = (afterReceiptDiscounts[i] + totalExclTaxAmt).r2()
             )
         }
@@ -493,11 +495,6 @@ class ReceiptCalculator(
         val fixedChargeResults     = fixedCharges.map { fc -> fc to fc.value.r2() }
         val totalFixedChargeAmount = fixedChargeResults.fold(ZERO) { a, p -> a + p.second }
 
-        // grandTotal = subtotal2 + exclusiveTaxTotal + fixedCharges
-        //
-        // subtotal2 is the after-receipt-discount total with inclusive taxes STILL EMBEDDED.
-        // Inclusive taxes are part of the stated price — they do NOT add to the grand total.
-        // Only exclusive taxes (levied on top) and fixed charges increase the amount payable.
         val grandTotal = (subtotal2 + exclusiveTaxTotal + totalFixedChargeAmount).r2()
 
         return CalculationResult(
