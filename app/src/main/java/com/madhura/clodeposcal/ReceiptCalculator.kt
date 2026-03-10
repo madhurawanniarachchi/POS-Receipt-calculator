@@ -182,7 +182,8 @@ class ReceiptCalculator(
             var diff = (total - alloc.fold(ZERO, BigDecimal::add)).r2()
             var i = 0
             while (diff.compareTo(ZERO) != 0) {
-                val step = if (diff > ZERO) BigDecimal("0.01") else BigDecimal("-0.01")
+                val step = BigDecimal.ONE.scaleByPowerOfTen(-decimalPlace)
+                    .let { if (diff > ZERO) it else it.negate() }
                 alloc[i++ % n] = (alloc[(i - 1) % n] + step).r2()
                 diff = (diff - step).r2()
             }
@@ -207,7 +208,9 @@ class ReceiptCalculator(
         val result = floored.toMutableList()
         repeat(remainderCents) { k ->
             val idx = priority[k % n].first
-            result[idx] = (result[idx] + BigDecimal("0.01")).r2()
+
+            val step = BigDecimal.ONE.scaleByPowerOfTen(-decimalPlace)
+            result[idx] = (result[idx] + step).r2()
         }
         return result
     }
