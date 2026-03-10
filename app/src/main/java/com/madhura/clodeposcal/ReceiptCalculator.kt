@@ -162,8 +162,6 @@ data class CalculationResult(
 
 class ReceiptCalculator(
     private val items: List<Item>,
-    private val lineDiscounts: List<Discount>,   // catalogue — kept for receipt-discount reference
-    private val taxes: List<Tax>,                // catalogue — defines processing order
     private val receiptDiscounts: List<Discount> = emptyList(),
     private val fixedCharges: List<FixedCharge> = emptyList()
 ) {
@@ -341,28 +339,19 @@ class ReceiptCalculator(
         // ══════════════════════════════════════════════════════════════════════
         // STEP 4 — Per-tax aggregation → single receipt total → RR to items
         //
-        // Tax eligibility is now determined by item.appliedTaxes (the embedded
-        // list). The global [taxes] catalogue defines processing ORDER only
-        // (BEFORE first, then AFTER).
-        //
-        // For any tax id that appears in an item's appliedTaxes but NOT in the
-        // global catalogue, it is processed in BEFORE order with its own
-        // embedded mode/taxOrder values.
+        // All tax information is derived solely from item.appliedTaxes.
+        // No external tax catalogue is needed. Taxes are processed BEFORE first,
+        // then AFTER (tax-on-tax), preserving first-seen insertion order within
+        // each group.
         // ══════════════════════════════════════════════════════════════════════
 
-        // Build ordered tax list: first from catalogue (BEFORE then AFTER),
-        // then any "orphan" taxes embedded in items that aren't in the catalogue.
-        val catalogueTaxIds = taxes.map { it.id }.toSet()
-        val orphanTaxes: List<Tax> = items
+        // Build ordered tax list purely from items' embedded appliedTaxes.
+        // Collect all unique taxes across all items, deduplicated by id,
+        // then sort BEFORE first, AFTER second (stable — preserves first-seen order within each group).
+        val orderedTaxes: List<Tax> = items
             .flatMap { it.appliedTaxes }
-            .filter { it.id !in catalogueTaxIds }
             .distinctBy { it.id }
-
-        val orderedTaxes: List<Tax> =
-            taxes.filter { it.taxOrder == TaxOrder.BEFORE } +
-                    taxes.filter { it.taxOrder == TaxOrder.AFTER } +
-                    orphanTaxes.filter { it.taxOrder == TaxOrder.BEFORE } +
-                    orphanTaxes.filter { it.taxOrder == TaxOrder.AFTER }
+            .sortedBy { if (it.taxOrder == TaxOrder.BEFORE) 0 else 1 }
 
         val taxAllocPerItem: MutableMap<String, List<BigDecimal>> = mutableMapOf()
         val taxResultMap:    MutableMap<String, TaxResult>        = mutableMapOf()
