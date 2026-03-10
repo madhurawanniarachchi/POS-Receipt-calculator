@@ -141,7 +141,7 @@ data class CalculationResult(
 // Calculator Engine
 // ─────────────────────────────────────────────────────────────────────────────
 
-class POSTaxCalculator(
+class ReceiptCalculator(
     private val items: List<Item>,
     private val lineDiscounts: List<Discount>,
     private val taxes: List<Tax>,
@@ -156,8 +156,9 @@ class POSTaxCalculator(
         private val MC      = MathContext(28, RoundingMode.HALF_UP)
     }
 
+    private val decimalPlace = 2
     /** Display / storage rounding: 2dp HALF_UP. */
-    private fun BigDecimal.r2() = setScale(2, RoundingMode.HALF_UP)
+    private fun BigDecimal.r2() = setScale(decimalPlace, RoundingMode.HALF_UP)
 
     /** Clamp to >= 0 then display-round. */
     private fun BigDecimal.clampR2() = this.max(ZERO).r2()
@@ -192,7 +193,7 @@ class POSTaxCalculator(
         val exact = weights.map { w -> w.multiply(total, MC).divide(weightSum, MC) }
 
         // Floor each to cents
-        val floored = exact.map { it.setScale(2, RoundingMode.DOWN) }
+        val floored = exact.map { it.setScale(decimalPlace, RoundingMode.DOWN) }
 
         // Count missing pennies
         val distributed   = floored.fold(ZERO, BigDecimal::add)

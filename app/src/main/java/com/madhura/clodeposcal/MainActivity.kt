@@ -136,7 +136,7 @@ fun POSTaxCalculatorScreen() {
 
     // ── Reactive calculation ──────────────────────────────────────────────────
     val result = remember(items, lineDiscounts, taxes, receiptDiscounts, fixedCharges) {
-        POSTaxCalculator(items, lineDiscounts, taxes, receiptDiscounts, fixedCharges).calculate()
+        ReceiptCalculator(items, lineDiscounts, taxes, receiptDiscounts, fixedCharges).calculate()
     }
 
     MaterialTheme(
