@@ -837,8 +837,23 @@ fun ReceiptPanel(result: CalculationResult) {
 
             ReceiptRow("Gross Total", result.grossTotal, POSColors.Accent2)
 
+            result.lineDiscountAmounts.forEach { (disc, amount) ->
+                if (amount > BigDecimal.ZERO) {
+                    val suffix = if (disc.type == DiscountType.PERCENT)
+                        " (${disc.value.stripTrailingZeros().toPlainString()}%)"
+                    else
+                        ""
+                    ReceiptRow(
+                        label    = "${disc.label.ifBlank { "Line Discount" }}$suffix",
+                        value    = amount,
+                        color    = POSColors.Orange,
+                        negative = true
+                    )
+                }
+            }
             if (result.totalLineDiscount > BigDecimal.ZERO)
-                ReceiptRow("Line Discounts", result.totalLineDiscount, POSColors.Red, negative = true)
+                ReceiptRow("Total Line Discounts", result.totalLineDiscount, POSColors.Red,
+                    fontWeight = FontWeight.Bold, negative = true)
 
             ReceiptRow("Subtotal (1) — after line discounts", result.subtotal1)
 

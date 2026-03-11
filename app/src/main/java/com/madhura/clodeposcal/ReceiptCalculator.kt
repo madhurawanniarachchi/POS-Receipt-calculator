@@ -147,7 +147,8 @@ data class TaxResult(
 data class CalculationResult(
     val items: List<ProcessedItem>,
     val grossTotal: BigDecimal,
-    val totalLineDiscount: BigDecimal,
+    /** Aggregated line discount amounts per discount, across all items. */
+    val lineDiscountAmounts: List<Pair<Discount, BigDecimal>>,
     val subtotal1: BigDecimal,
     val receiptDiscountAmounts: List<Pair<Discount, BigDecimal>>,
     val totalReceiptDiscountAmount: BigDecimal,
@@ -158,7 +159,11 @@ data class CalculationResult(
     val fixedCharges: List<Pair<FixedCharge, BigDecimal>>,
     val totalFixedChargeAmount: BigDecimal,
     val grandTotal: BigDecimal
-)
+) {
+    /** Σ all lineDiscountAmounts — convenience total. */
+    val totalLineDiscount: BigDecimal
+        get() = lineDiscountAmounts.fold(BigDecimal.ZERO) { a, p -> a + p.second }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Calculator Engine
@@ -508,10 +513,19 @@ class ReceiptCalculator(
 
         val grandTotal = (subtotal2 + exclusiveTaxTotal + totalFixedChargeAmount).r2()
 
+        // Aggregate per-item line discount breakdowns into a receipt-level list.
+        // Discounts are deduplicated by id, preserving first-seen order.
+        val lineDiscountAmounts: List<Pair<Discount, BigDecimal>> = processedItems
+            .flatMap { it.lineDiscountBreakdown }
+            .groupBy { it.first.id }
+            .map { (_, pairs) ->
+                pairs.first().first to pairs.fold(BigDecimal.ZERO) { a, p -> a + p.second }
+            }
+
         return CalculationResult(
             items                      = processedItems,
             grossTotal                 = grossTotal,
-            totalLineDiscount          = totalLineDiscount,
+            lineDiscountAmounts        = lineDiscountAmounts,
             subtotal1                  = subtotal1,
             receiptDiscountAmounts     = receiptDiscountAmounts,
             totalReceiptDiscountAmount = totalReceiptDiscountAmount,
